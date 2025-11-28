@@ -1,0 +1,296 @@
+"""
+Tree Manager for handling tree view operations in the GUI
+"""
+
+import tkinter as tk
+from tkinter import ttk
+import logging
+
+
+class TreeManager:
+    """Manages tree view operations and interactions"""
+
+    def __init__(self, tree, logger):
+        self.tree = tree
+        self.logger = logging.getLogger('CodesysXMLDocGenerator.GUI.TreeManager')
+        self.logger.debug("TreeManager initialized")
+
+        # Configure tree tags for different colors
+        self._configure_tree_tags()
+
+    def _configure_tree_tags(self):
+        """Configure color tags for different item types"""
+        self.tree.tag_configure('category', background='#f0f0f0', font=('TkDefaultFont', 10, 'bold'))
+        self.tree.tag_configure('subcategory', background='#f8f8f8', font=('TkDefaultFont', 9, 'italic'))
+        self.tree.tag_configure('datatype', background='#e8f4fd')
+        self.tree.tag_configure('pou', background='#f0f8e8')
+        self.tree.tag_configure('action', background='#fff8e8')
+        self.tree.tag_configure('method', background='#f8e8ff')
+        self.tree.tag_configure('globalvar', background='#e8f8f0')
+        self.tree.tag_configure('enum', background='#f0e8ff')
+        self.tree.tag_configure('enumvalue', background='#f8f0ff')
+        self.tree.tag_configure('union', background='#fff0f0')
+        self.tree.tag_configure('unionmember', background='#fff8f8')
+        self.tree.tag_configure('structure', background='#f0f0ff')
+        self.tree.tag_configure('structmember', background='#f8f8ff')
+
+    def clear_tree(self):
+        """Clear all items from the tree"""
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        self.logger.debug("Tree cleared")
+
+    def display_json_in_tree(self, json_data):
+        """Display the JSON data in the tree view with all categories"""
+        self.logger.debug("Displaying JSON data in tree view")
+
+        if not json_data:
+            self.logger.warning("No JSON data to display")
+            return
+
+        try:
+            # Add DataTypes section
+            data_types = json_data.get('DataTypes', [])
+            if data_types:
+                data_types_node = self.tree.insert('', 'end', text='DataTypes',
+                                                   values=('Category', f'{len(data_types)} items'),
+                                                   tags=('category',))
+                for data_type in data_types:
+                    details = data_type.get('details', {})
+                    base_type = details.get('base_type', 'N/A')
+                    self.tree.insert(data_types_node, 'end',
+                                     text=data_type['name'],
+                                     values=('DataType', f'Base: {base_type}'),
+                                     tags=('datatype',))
+                self.tree.item(data_types_node, open=True)
+            else:
+                self.tree.insert('', 'end', text='DataTypes',
+                                 values=('Category', '0 items (empty)'),
+                                 tags=('category',))
+
+            # Add POUs section with actions and methods
+            pous = json_data.get('POUs', [])
+            if pous:
+                pous_node = self.tree.insert('', 'end', text='POUs',
+                                             values=('Category', f'{len(pous)} items'),
+                                             tags=('category',))
+
+                for pou in pous:
+                    pou_type = pou.get('pou_type', 'unknown').upper()
+                    details = pou.get('details', {})
+                    var_count = len(details.get('variables', []))
+
+                    # Create POU node
+                    pou_node = self.tree.insert(pous_node, 'end',
+                                                text=pou['name'],
+                                                values=(f'POU ({pou_type})', f'Vars: {var_count}'),
+                                                tags=('pou',))
+
+                    # Add Actions sub-node if they exist
+                    actions = pou.get('actions', [])
+                    if actions:
+                        actions_node = self.tree.insert(pou_node, 'end',
+                                                        text='Actions',
+                                                        values=('Sub-category', f'{len(actions)} items'),
+                                                        tags=('subcategory',))
+                        for action in actions:
+                            action_details = action.get('details', {})
+                            action_vars = len(action_details.get('variables', []))
+                            self.tree.insert(actions_node, 'end',
+                                             text=action['name'],
+                                             values=('Action', f'Vars: {action_vars}'),
+                                             tags=('action',))
+
+                    # Add Methods sub-node if they exist
+                    methods = pou.get('methods', [])
+                    if methods:
+                        methods_node = self.tree.insert(pou_node, 'end',
+                                                        text='Methods',
+                                                        values=('Sub-category', f'{len(methods)} items'),
+                                                        tags=('subcategory',))
+                        for method in methods:
+                            method_details = method.get('details', {})
+                            method_vars = len(method_details.get('variables', []))
+                            self.tree.insert(methods_node, 'end',
+                                             text=method['name'],
+                                             values=('Method', f'Vars: {method_vars}'),
+                                             tags=('method',))
+
+                self.tree.item(pous_node, open=True)
+            else:
+                self.tree.insert('', 'end', text='POUs',
+                                 values=('Category', '0 items (empty)'),
+                                 tags=('category',))
+
+            # Add Global Variables section
+            global_vars = json_data.get('GlobalVariables', [])
+            if global_vars:
+                global_vars_node = self.tree.insert('', 'end', text='Global Variables',
+                                                    values=('Category', f'{len(global_vars)} items'),
+                                                    tags=('category',))
+
+                # Group by globalVars name
+                groups = {}
+                for var in global_vars:
+                    group_name = var.get('global_vars_group', 'Global Variables')
+                    if group_name not in groups:
+                        groups[group_name] = []
+                    groups[group_name].append(var)
+
+                for group_name, vars_list in groups.items():
+                    group_node = self.tree.insert(global_vars_node, 'end',
+                                                  text=group_name,
+                                                  values=('Group', f'{len(vars_list)} items'),
+                                                  tags=('subcategory',))
+
+                    for var in vars_list:
+                        type_details = var.get('type_details', {})
+                        type_category = type_details.get('category', 'basic')
+                        self.tree.insert(group_node, 'end',
+                                         text=var['name'],
+                                         values=('Variable', f'Type: {var["type"]} ({type_category})'),
+                                         tags=('globalvar',))
+
+                self.tree.item(global_vars_node, open=True)
+            else:
+                self.tree.insert('', 'end', text='Global Variables',
+                                 values=('Category', '0 items (empty)'),
+                                 tags=('category',))
+
+            # Add Enums section
+            enums = json_data.get('Enums', [])
+            if enums:
+                enums_node = self.tree.insert('', 'end', text='Enumerations',
+                                              values=('Category', f'{len(enums)} items'),
+                                              tags=('category',))
+
+                for enum in enums:
+                    values_count = len(enum.get('values', []))
+                    base_type = enum.get('base_type', 'INT')
+                    enum_node = self.tree.insert(enums_node, 'end',
+                                                 text=enum['name'],
+                                                 values=('Enum', f'Values: {values_count}, Base: {base_type}'),
+                                                 tags=('enum',))
+
+                    # Add enum values
+                    values = enum.get('values', [])
+                    if values:
+                        values_node = self.tree.insert(enum_node, 'end',
+                                                       text='Values',
+                                                       values=('Sub-category', f'{len(values)} items'),
+                                                       tags=('subcategory',))
+                        for value in values:
+                            self.tree.insert(values_node, 'end',
+                                             text=value['name'],
+                                             values=('Enum Value', f'Value: {value.get("value", "")}'),
+                                             tags=('enumvalue',))
+
+                self.tree.item(enums_node, open=True)
+            else:
+                self.tree.insert('', 'end', text='Enumerations',
+                                 values=('Category', '0 items (empty)'),
+                                 tags=('category',))
+
+            # Add Unions section
+            unions = json_data.get('Unions', [])
+            if unions:
+                unions_node = self.tree.insert('', 'end', text='Unions',
+                                               values=('Category', f'{len(unions)} items'),
+                                               tags=('category',))
+
+                for union in unions:
+                    members_count = len(union.get('members', []))
+                    union_node = self.tree.insert(unions_node, 'end',
+                                                  text=union['name'],
+                                                  values=('Union', f'Members: {members_count}'),
+                                                  tags=('union',))
+
+                    # Add union members
+                    members = union.get('members', [])
+                    if members:
+                        members_node = self.tree.insert(union_node, 'end',
+                                                        text='Members',
+                                                        values=('Sub-category', f'{len(members)} items'),
+                                                        tags=('subcategory',))
+                        for member in members:
+                            self.tree.insert(members_node, 'end',
+                                             text=member['name'],
+                                             values=('Member', f'Type: {member["type"]}'),
+                                             tags=('unionmember',))
+
+                self.tree.item(unions_node, open=True)
+            else:
+                self.tree.insert('', 'end', text='Unions',
+                                 values=('Category', '0 items (empty)'),
+                                 tags=('category',))
+
+            # Add Structures section
+            structures = json_data.get('Structures', [])
+            if structures:
+                structures_node = self.tree.insert('', 'end', text='Structures',
+                                                   values=('Category', f'{len(structures)} items'),
+                                                   tags=('category',))
+
+                for structure in structures:
+                    members_count = len(structure.get('members', []))
+                    struct_node = self.tree.insert(structures_node, 'end',
+                                                   text=structure['name'],
+                                                   values=('Structure', f'Members: {members_count}'),
+                                                   tags=('structure',))
+
+                    # Add structure members
+                    members = structure.get('members', [])
+                    if members:
+                        members_node = self.tree.insert(struct_node, 'end',
+                                                        text='Members',
+                                                        values=('Sub-category', f'{len(members)} items'),
+                                                        tags=('subcategory',))
+                        for member in members:
+                            self.tree.insert(members_node, 'end',
+                                             text=member['name'],
+                                             values=('Member', f'Type: {member["type"]}'),
+                                             tags=('structmember',))
+
+                self.tree.item(structures_node, open=True)
+            else:
+                self.tree.insert('', 'end', text='Structures',
+                                 values=('Category', '0 items (empty)'),
+                                 tags=('category',))
+
+            self.logger.debug("Tree populated with all categories")
+
+        except Exception as e:
+            self.logger.error(f"Error displaying JSON in tree: {str(e)}", exc_info=True)
+            raise
+
+    def handle_double_click(self, event):
+        """Handle tree double-click for expand/collapse"""
+        item = self.tree.selection()[0] if self.tree.selection() else None
+        if item:
+            # Toggle expand/collapse
+            if self.tree.item(item, 'open'):
+                self.tree.item(item, open=False)
+                self.logger.debug(f"Collapsed tree item: {self.tree.item(item, 'text')}")
+            else:
+                self.tree.item(item, open=True)
+                self.logger.debug(f"Expanded tree item: {self.tree.item(item, 'text')}")
+
+    def get_selected_item(self):
+        """Get information about the currently selected tree item"""
+        selected_items = self.tree.selection()
+        if not selected_items:
+            return None
+
+        item_id = selected_items[0]
+        item_text = self.tree.item(item_id, 'text')
+        item_values = self.tree.item(item_id, 'values')
+        item_tags = self.tree.item(item_id, 'tags')
+
+        self.logger.debug(f"Tree item selected: {item_text}, values: {item_values}, tags: {item_tags}")
+
+        return {
+            'id': item_id,
+            'text': item_text,
+            'values': item_values,
+            'tags': item_tags
+        }
