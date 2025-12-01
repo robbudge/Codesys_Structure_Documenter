@@ -534,7 +534,7 @@ class CodesysXmlDocumenter:
                     add_type_recursive(variable.type)
 
     def _export_uml_for_selected(self):
-        """Export UML diagram for selected item"""
+        """Export Mermaid UML diagram for selected item"""
         selected = self.tree_display.get_selected_item()
         if not selected:
             self.logger.warning("Please select an item to export.")
@@ -562,131 +562,30 @@ class CodesysXmlDocumenter:
         # Generate UML
         uml_generator = UMLGenerator(self.logger)
         try:
-            self.status_var.set(f"Generating UML for {selected['text']}...")
+            self.status_var.set(f"Generating Mermaid diagram for {selected['text']}...")
             self.root.update()
 
-            # Call the UML generator method - FIXED VERSION
-            # First, let's check what methods are available
-            self.logger.debug(
-                f"UMLGenerator methods: {[m for m in dir(uml_generator) if not m.startswith('_') and 'uml' in m.lower()]}")
+            self.logger.info(f"Generating Mermaid diagram for union: {item_data.name}")
 
-            # Try to call the method with the correct parameters
-            html_file = None
-
-            # Method 1: Try the standard method name
-            if hasattr(uml_generator, 'generate_uml_for_union'):
-                self.logger.debug("Using generate_uml_for_union method")
-                try:
-                    html_file = uml_generator.generate_uml_for_union(item_data, self.xml_export, output_dir)
-                except TypeError as e:
-                    self.logger.warning(f"Method call failed: {str(e)}")
-                    # Try with fewer parameters
-                    try:
-                        html_file = uml_generator.generate_uml_for_union(item_data, output_dir)
-                    except Exception as e2:
-                        self.logger.error(f"Alternative call also failed: {str(e2)}")
-
-            # Method 2: Try any other UML method
-            if not html_file:
-                uml_methods = [m for m in dir(uml_generator)
-                               if callable(getattr(uml_generator, m)) and 'uml' in m.lower() and not m.startswith('_')]
-                for method_name in uml_methods:
-                    if method_name != 'generate_uml_for_union':  # Already tried this
-                        self.logger.debug(f"Trying alternative method: {method_name}")
-                        method = getattr(uml_generator, method_name)
-                        try:
-                            html_file = method(item_data, self.xml_export, output_dir)
-                            if html_file:
-                                break
-                        except TypeError:
-                            try:
-                                html_file = method(item_data, output_dir)
-                                if html_file:
-                                    break
-                            except Exception:
-                                continue
-                        except Exception:
-                            continue
+            # Call the Mermaid UML generator
+            html_file = uml_generator.generate_uml_for_union(item_data, self.xml_export, output_dir)
 
             if html_file and Path(html_file).exists():
-                success_msg = f"Generated UML diagram: {html_file}"
+                success_msg = f"Generated Mermaid diagram: {html_file}"
                 self.logger.info(success_msg)
                 self.status_var.set(success_msg)
 
                 # Option to open the file
                 self._open_file(html_file)
             else:
-                # If no method worked, try to create a simple diagram manually
-                self.logger.warning("No UML method worked, creating simple diagram...")
-                try:
-                    # Create a simple PlantUML file directly
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    puml_file = output_dir / f"{item_data.name}_simple_{timestamp}.puml"
-
-                    # Generate simple PlantUML
-                    plantuml = f"""@startuml
-    title "{item_data.name}" - Union
-
-    class "{item_data.name}" <<union>> {{
-    """
-                    for member in item_data.members:
-                        initial_text = f" = {member.initial_value}" if member.initial_value else ""
-                        plantuml += f"  {member.name}: {member.type}{initial_text}\\n"
-
-                    plantuml += """}
-
-    @enduml"""
-
-                    with open(puml_file, 'w', encoding='utf-8') as f:
-                        f.write(plantuml)
-
-                    # Create simple HTML
-                    html_file = output_dir / f"{item_data.name}_simple_{timestamp}.html"
-                    html_content = f"""<!DOCTYPE html>
-    <html>
-    <head>
-        <title>{item_data.name} - UML Diagram</title>
-        <style>
-            body {{ font-family: Arial, sans-serif; margin: 40px; }}
-            h1 {{ color: #333; }}
-            pre {{ background: #f5f5f5; padding: 20px; border-radius: 5px; }}
-        </style>
-    </head>
-    <body>
-        <h1>{item_data.name} - Union</h1>
-        <h2>PlantUML Code:</h2>
-        <pre>{plantuml}</pre>
-        <h2>Members:</h2>
-        <ul>
-    """
-                    for member in item_data.members:
-                        html_content += f"<li><strong>{member.name}</strong>: {member.type}</li>\\n"
-
-                    html_content += f"""    </ul>
-        <p><em>Copy the PlantUML code above to <a href="https://www.plantuml.com/plantuml/uml/">plantuml.com</a> to view the diagram.</em></p>
-        <p>Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
-    </body>
-    </html>"""
-
-                    with open(html_file, 'w', encoding='utf-8') as f:
-                        f.write(html_content)
-
-                    success_msg = f"Generated simple UML diagram: {html_file}"
-                    self.logger.info(success_msg)
-                    self.status_var.set(success_msg)
-                    self._open_file(str(html_file))
-
-                except Exception as fallback_error:
-                    error_msg = f"Failed to generate UML diagram: {str(fallback_error)}"
-                    self.logger.error(error_msg)
-                    self.status_var.set("Error: Failed to generate UML diagram")
+                error_msg = "Failed to generate Mermaid diagram"
+                self.logger.error(error_msg)
+                self.status_var.set(f"Error: {error_msg}")
 
         except Exception as e:
-            error_msg = f"UML generation failed: {str(e)}"
+            error_msg = f"Mermaid generation failed: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
             self.status_var.set(f"Error: {str(e)}")
-
-
     def run(self):
         """Start the application"""
         self.root.mainloop()

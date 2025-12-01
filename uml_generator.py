@@ -1,87 +1,231 @@
 """
-Simple UML Generator - Shows ALL enum values
+Simple UML Generator - Shows ALL enum values (Mermaid erDiagram format)
 """
 
 import logging
+import traceback
 from typing import Dict, Any
 from pathlib import Path
 from datetime import datetime
 
 
 class UMLGenerator:
-    """Generates documentation showing ALL enum values"""
+    """Generates documentation showing ALL enum values using Mermaid erDiagram"""
+
+    # Class variable to track instances
+    _instance_count = 0
 
     def __init__(self, logger=None):
         self.logger = logger or logging.getLogger(__name__)
+        UMLGenerator._instance_count += 1
+        self.instance_id = UMLGenerator._instance_count
+        self.logger.info(f"[UMLGenerator_{self.instance_id}] Initialized - Mermaid erDiagram version")
 
     def generate_uml_for_union(self, union, xml_export, output_dir: Path) -> str:
-        """Generate diagram for a union"""
+        """Generate Mermaid erDiagram for a union"""
         try:
-            output_dir.mkdir(exist_ok=True)
+            self.logger.info(f"[UMLGenerator_{self.instance_id}] ===== START generate_uml_for_union =====")
+            self.logger.info(f"[UMLGenerator_{self.instance_id}] Union: {union.name}")
+            self.logger.info(f"[UMLGenerator_{self.instance_id}] Output dir: {output_dir}")
 
-            self.logger.info(f"Generating documentation for union: {union.name}")
+            # Log union details
+            if hasattr(union, 'members'):
+                self.logger.info(f"[UMLGenerator_{self.instance_id}] Union has {len(union.members)} members:")
+                for i, member in enumerate(union.members):
+                    self.logger.info(f"[UMLGenerator_{self.instance_id}]   [{i}] {member.name} : {member.type}")
 
-            # Build enum lookup
+            # Ensure output directory exists
+            output_dir.mkdir(exist_ok=True, parents=True)
+            self.logger.debug(f"[UMLGenerator_{self.instance_id}] Output directory ready")
+
+            # Build enum lookup - IMPORTANT: Get ALL enums, not just first 5!
             enum_lookup = {}
             if xml_export and hasattr(xml_export, 'enums'):
-                for enum in xml_export.enums:
+                self.logger.info(f"[UMLGenerator_{self.instance_id}] Found {len(xml_export.enums)} total enums in XML")
+
+                # Get ALL enums, not just first 5!
+                for i, enum in enumerate(xml_export.enums):  # REMOVED [:5] !!!
+                    # Store with multiple keys for easier lookup
+                    enum_lookup[enum.name] = enum
                     enum_lookup[enum.name.lower()] = enum
-                    self.logger.info(f"Found enum: {enum.name} with {len(enum.values)} values")
+
+                    # Only log first 10 for debugging
+                    if i < 10:
+                        self.logger.debug(
+                            f"[UMLGenerator_{self.instance_id}] Enum [{i}]: {enum.name} ({len(enum.values)} values)")
+
+                if len(xml_export.enums) > 10:
+                    self.logger.debug(
+                        f"[UMLGenerator_{self.instance_id}] ... and {len(xml_export.enums) - 10} more enums")
+
+                # Log specific lookup for debugging
+                self.logger.debug(
+                    f"[UMLGenerator_{self.instance_id}] Total enum lookup entries: {len(enum_lookup) // 2} enums (stored with case and lowercase keys)")
+
+                # Check if the specific enum we need is in the lookup
+                for member in union.members:
+                    member_type_lower = member.type.lower()
+                    if member_type_lower not in {'int', 'bool', 'real', 'dint', 'lint', 'sint', 'usint',
+                                                 'uint', 'udint', 'ulint', 'byte', 'word', 'dword', 'lword'}:
+                        self.logger.debug(
+                            f"[UMLGenerator_{self.instance_id}] Checking for enum '{member.type}' in lookup...")
+                        self.logger.debug(
+                            f"[UMLGenerator_{self.instance_id}]   Exact match: {member.type in enum_lookup}")
+                        self.logger.debug(
+                            f"[UMLGenerator_{self.instance_id}]   Lowercase match: {member_type_lower in enum_lookup}")
+
+                        # Also search for similar names
+                        found = False
+                        for key in enum_lookup.keys():
+                            if key.lower() == member_type_lower:
+                                self.logger.debug(f"[UMLGenerator_{self.instance_id}]   Found similar: {key}")
+                                found = True
+                                break
+
+                        if not found:
+                            self.logger.warning(
+                                f"[UMLGenerator_{self.instance_id}]   Enum '{member.type}' not found in any form!")
+            else:
+                self.logger.warning(f"[UMLGenerator_{self.instance_id}] No enums found or xml_export is None")
 
             # Generate Mermaid erDiagram
-            mermaid_code = self._create_simple_er_diagram(union, enum_lookup)
+            self.logger.info(f"[UMLGenerator_{self.instance_id}] Generating Mermaid erDiagram...")
+            mermaid_code = self._create_mermaid_er_diagram(union, enum_lookup)
+            self.logger.info(f"[UMLGenerator_{self.instance_id}] Mermaid code generated: {len(mermaid_code)} chars")
 
-            # Create simple HTML
+            # Log first few lines of Mermaid code
+            mermaid_lines = mermaid_code.split('\n')
+            for i, line in enumerate(mermaid_lines[:15]):
+                self.logger.debug(f"[UMLGenerator_{self.instance_id}] Mermaid line {i}: {line}")
+            if len(mermaid_lines) > 15:
+                self.logger.debug(f"[UMLGenerator_{self.instance_id}] ... and {len(mermaid_lines) - 15} more lines")
+
+            # Create HTML page
+            self.logger.info(f"[UMLGenerator_{self.instance_id}] Creating HTML page...")
             html = self._create_simple_html_page(union, mermaid_code, enum_lookup)
+            self.logger.info(f"[UMLGenerator_{self.instance_id}] HTML generated: {len(html)} chars")
 
-            # Save
+            # Check if HTML contains Mermaid
+            if "mermaid" in html.lower():
+                self.logger.info(f"[UMLGenerator_{self.instance_id}] HTML contains 'mermaid' keyword")
+            else:
+                self.logger.warning(f"[UMLGenerator_{self.instance_id}] HTML does NOT contain 'mermaid' keyword!")
+
+            # Save file
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"{union.name}_{timestamp}.html"
             filepath = output_dir / filename
 
+            self.logger.info(f"[UMLGenerator_{self.instance_id}] Saving to: {filepath}")
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(html)
 
-            self.logger.info(f"Created documentation: {filepath}")
+            # Verify file was written
+            if filepath.exists():
+                file_size = filepath.stat().st_size
+                self.logger.info(f"[UMLGenerator_{self.instance_id}] File saved successfully: {file_size} bytes")
+
+                # Read back first few lines to verify content
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    first_lines = ''.join([next(f) for _ in range(5)])
+                self.logger.debug(f"[UMLGenerator_{self.instance_id}] First 5 lines of saved file:\n{first_lines}")
+
+                if "mermaid" in first_lines.lower():
+                    self.logger.info(f"[UMLGenerator_{self.instance_id}] [OK] File contains Mermaid - CORRECT")
+                else:
+                    self.logger.warning(
+                        f"[UMLGenerator_{self.instance_id}] [WARN] File doesn't contain Mermaid keyword")
+            else:
+                self.logger.error(f"[UMLGenerator_{self.instance_id}] File was not created!")
+
+            self.logger.info(f"[UMLGenerator_{self.instance_id}] ===== END generate_uml_for_union =====")
             return str(filepath)
 
         except Exception as e:
-            self.logger.error(f"Error: {str(e)}", exc_info=True)
+            self.logger.error(f"[UMLGenerator_{self.instance_id}] Error generating UML: {str(e)}", exc_info=True)
+            self.logger.error(f"[UMLGenerator_{self.instance_id}] Full traceback:\n{traceback.format_exc()}")
             return ""
+    def _create_mermaid_er_diagram(self, union, enum_lookup: Dict[str, Any]) -> str:
+        """Create Mermaid erDiagram showing all enum values"""
+        self.logger.debug(
+            f"[UMLGenerator_{self.instance_id}] [_create_mermaid_er_diagram] Creating erDiagram for union: {union.name}")
+        self.logger.debug(f"[UMLGenerator_{self.instance_id}] Looking for enums in union members...")
 
-    def _create_simple_er_diagram(self, union, enum_lookup: Dict[str, Any]) -> str:
-        """Create simple erDiagram showing all enum values"""
         lines = ["erDiagram"]
+        lines.append("")
 
         # Union entity
-        lines.append(f'    {union.name} {{')
+        lines.append(f"    {union.name} {{")
 
         for member in union.members:
-            if member.type.upper() in {'INT', 'BOOL', 'REAL', 'DINT', 'LINT', 'SINT', 'USINT',
-                                      'UINT', 'UDINT', 'ULINT', 'BYTE', 'WORD', 'DWORD', 'LWORD'}:
-                lines.append(f'    {member.type.upper()} {member.name}')
+            member_type = member.type.upper()
+            # Check if it's a basic type
+            if member_type in {'INT', 'BOOL', 'REAL', 'DINT', 'LINT', 'SINT', 'USINT',
+                               'UINT', 'UDINT', 'ULINT', 'BYTE', 'WORD', 'DWORD', 'LWORD'}:
+                lines.append(f"        {member_type} {member.name}")
+                self.logger.debug(f"[UMLGenerator_{self.instance_id}] Basic type member: {member.name} : {member_type}")
             else:
-                lines.append(f'    enum {member.name}')
+                # Check if it's an enum (case-insensitive)
+                member_type_lower = member.type.lower()
+                self.logger.debug(
+                    f"[UMLGenerator_{self.instance_id}] Checking if {member.type} (lower: {member_type_lower}) is in enum lookup...")
 
-        lines.append('}')
+                # Try exact match first
+                if member.type in enum_lookup:
+                    lines.append(f"        enum {member.name}")
+                    self.logger.debug(
+                        f"[UMLGenerator_{self.instance_id}] Found exact match: {member.type} -> enum {member.name}")
+                # Try case-insensitive match
+                elif member_type_lower in enum_lookup:
+                    lines.append(f"        enum {member.name}")
+                    self.logger.debug(
+                        f"[UMLGenerator_{self.instance_id}] Found case-insensitive match: {member_type_lower} -> enum {member.name}")
+                else:
+                    lines.append(f"        {member.type} {member.name}")
+                    self.logger.debug(f"[UMLGenerator_{self.instance_id}] Not found in enum lookup: {member.type}")
+        lines.append("    }")
+        lines.append("")
 
         # Add all enum entities with ALL values
+        enum_entities_added = []
         for member in union.members:
+            member_type = member.type
             member_type_lower = member.type.lower()
-            if member_type_lower in enum_lookup:
-                enum = enum_lookup[member_type_lower]
-                lines.append(f'    {member.type} {{')
+
+            # Try multiple ways to find the enum
+            enum_found = None
+            if member_type in enum_lookup:
+                enum_found = enum_lookup[member_type]
+            elif member_type_lower in enum_lookup:
+                enum_found = enum_lookup[member_type_lower]
+
+            if enum_found and member.type not in enum_entities_added:
+                enum_entities_added.append(member.type)
+                self.logger.debug(
+                    f"[UMLGenerator_{self.instance_id}] Adding enum entity: {member.type} with {len(enum_found.values)} values")
+
+                lines.append(f"    {member.type} {{")
 
                 # Show ALL values - no truncation
-                for value in enum.values:
-                    lines.append(f'        int {value.name} "{value.value}"')
+                for value in enum_found.values:
+                    lines.append(f"        int {value.name} \"{value.value}\"")
 
-                lines.append('}')
+                lines.append("    }")
+                lines.append("")
 
-                # Relationship
+                # Relationship (one-to-one relationship between union and enum)
                 lines.append(f'    {union.name} ||--|| {member.type} : "{member.name}"')
+                self.logger.debug(
+                    f"[UMLGenerator_{self.instance_id}] Added relationship: {union.name} ||--|| {member.type} : \"{member.name}\"")
 
-        return '\n'.join(lines)
+        result = '\n'.join(lines)
+        self.logger.debug(f"[UMLGenerator_{self.instance_id}] Mermaid erDiagram code:\n{result}")
+
+        # Log summary
+        self.logger.info(
+            f"[UMLGenerator_{self.instance_id}] Created erDiagram with {len(enum_entities_added)} enum entities")
+
+        return result
 
     def _create_simple_html_page(self, union, mermaid_code: str, enum_lookup: Dict[str, Any]) -> str:
         """Create simple HTML page showing ALL values"""
@@ -93,30 +237,60 @@ class UMLGenerator:
                 enum = enum_lookup[member_type_lower]
                 enum_tables += self._create_complete_enum_table(member.type, enum, union.name, member.name)
 
+        # Build HTML
         html = f"""<!DOCTYPE html>
 <html>
 <head>
     <title>{union.name} - Union Documentation</title>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
     <script>
+        // Configure Mermaid for erDiagram support
         mermaid.initialize({{
             startOnLoad: true,
             theme: 'default',
-            er: {{ useMaxWidth: false }}
+            securityLevel: 'loose',
+            er: {{
+                useMaxWidth: false,
+                diagramPadding: 20
+            }}
         }});
+        
+        // Simple render function
+        function renderMermaid() {{
+            console.log('Rendering Mermaid erDiagram...');
+            console.log('Mermaid version:', mermaid.version);
+            
+            // Check if erDiagram is supported
+            if (typeof mermaid.mermaidAPI.getConfig === 'function') {{
+                console.log('Mermaid API available');
+            }}
+            
+            // Render all diagrams
+            mermaid.init(undefined, document.querySelectorAll('.mermaid'));
+        }}
+        
+        // Render when page loads
+        document.addEventListener('DOMContentLoaded', renderMermaid);
+        
+        // Also try after a short delay
+        setTimeout(renderMermaid, 100);
+        setTimeout(renderMermaid, 500); // Additional attempt
     </script>
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }}
         .container {{ max-width: 1400px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
         h1 {{ color: #333; border-bottom: 2px solid #4A90E2; padding-bottom: 10px; }}
-        .mermaid {{ margin: 20px 0; background: white; padding: 20px; border: 1px solid #ddd; border-radius: 5px; min-height: 500px; overflow-x: auto; }}
+        .mermaid {{ margin: 20px 0; background: white; padding: 20px; border: 1px solid #ddd; border-radius: 5px; min-height: 400px; overflow-x: auto; }}
         table {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}
         th {{ background: #4A90E2; color: white; padding: 12px; text-align: left; position: sticky; top: 0; }}
         td {{ padding: 10px 12px; border-bottom: 1px solid #eee; }}
         tr:nth-child(even) {{ background: #f9f9f9; }}
         .union-info {{ background: #e8f4f8; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #4A90E2; }}
         .enum-section {{ background: #f0f8e8; padding: 20px; border-radius: 8px; margin: 25px 0; border: 1px solid #7CB342; }}
-        pre {{ background: #2c3e50; color: white; padding: 15px; border-radius: 5px; overflow-x: auto; font-family: monospace; }}
+        pre {{ background: #2c3e50; color: white; padding: 15px; border-radius: 5px; overflow-x: auto; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 14px; white-space: pre-wrap; word-wrap: break-word; }}
+        .mermaid svg {{ min-width: 100%; }}
+        .note {{ background: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; border-radius: 5px; margin: 10px 0; }}
+        .debug-info {{ background: #e8f4f8; padding: 10px; border-radius: 5px; margin: 10px 0; font-family: monospace; font-size: 12px; }}
     </style>
 </head>
 <body>
@@ -131,6 +305,12 @@ class UMLGenerator:
         </div>
         
         <h2>Entity Relationship Diagram</h2>
+        <div class="note">
+            <strong>Note:</strong> This diagram uses Mermaid's erDiagram syntax showing the union structure and its relationship to enumerations.
+        </div>
+        <div class="debug-info">
+            <strong>Debug Info:</strong> Using Mermaid erDiagram format | Union: {union.name} | Enums: {sum(1 for m in union.members if m.type.lower() in enum_lookup)}
+        </div>
         <div class="mermaid">
 {mermaid_code}
         </div>
@@ -140,9 +320,16 @@ class UMLGenerator:
             <ul>
 """
 
-        # Add all union members
+        # Add all union members with type info
         for member in union.members:
-            html += f"<li><strong>{member.name}</strong>: {member.type}</li>\n"
+            member_type = member.type.upper()
+            if member_type in {'INT', 'BOOL', 'REAL', 'DINT', 'LINT', 'SINT', 'USINT',
+                              'UINT', 'UDINT', 'ULINT', 'BYTE', 'WORD', 'DWORD', 'LWORD'}:
+                html += f"<li><strong>{member.name}</strong>: {member_type} (basic type)</li>\n"
+            elif member.type.lower() in enum_lookup:
+                html += f"<li><strong>{member.name}</strong>: {member.type} (enumeration - see table below)</li>\n"
+            else:
+                html += f"<li><strong>{member.name}</strong>: {member.type}</li>\n"
 
         html += """            </ul>
         </div>
@@ -161,22 +348,8 @@ class UMLGenerator:
 {mermaid_code}
         </pre>
         
-        <p><small>Generated by Codesys XML Documentation Generator</small></p>
+        <p><small>Generated by Codesys XML Documentation Generator • Using Mermaid v10.6.1 erDiagram format</small></p>
     </div>
-    
-    <script>
-        // Simple debugging
-        setTimeout(() => {{
-            const svg = document.querySelector('.mermaid svg');
-            if (svg) {{
-                console.log('Diagram rendered successfully');
-                // Make diagram scrollable if too wide
-                if (svg.clientWidth > 1000) {{
-                    svg.style.minWidth = svg.clientWidth + 'px';
-                }}
-            }}
-        }}, 1000);
-    </script>
 </body>
 </html>"""
 
@@ -189,15 +362,19 @@ class UMLGenerator:
             <h3>{enum_name} Enumeration ({len(enum.values)} values)</h3>
             <p><em>Used by: {union_name}.{member_name}</em></p>
             <table>
-                <tr><th>Constant Name</th><th>Value</th><th>Description</th></tr>
+                <thead>
+                    <tr><th>#</th><th>Constant Name</th><th>Value</th><th>Description</th></tr>
+                </thead>
+                <tbody>
         """
 
-        # Add ALL values
-        for value in enum.values:
+        # Add ALL values with index
+        for i, value in enumerate(enum.values, 1):
             desc = getattr(value, 'description', '') or ''
-            table += f"<tr><td>{value.name}</td><td>{value.value}</td><td>{desc}</td></tr>\n"
+            table += f"<tr><td>{i}</td><td>{value.name}</td><td>{value.value}</td><td>{desc}</td></tr>\n"
 
         table += """
+                </tbody>
             </table>
         </div>
         """
