@@ -294,3 +294,54 @@ class TreeManager:
             'values': item_values,
             'tags': item_tags
         }
+
+    def extract_item_data(self, item_id, item_tags):
+        """Extract item data from tree selection"""
+        try:
+            # Get the selected item from tree
+            item = self.tree.item(item_id)
+
+            # Create basic data structure
+            data = {
+                'name': item.get('text', ''),
+                'tags': item_tags
+            }
+
+            # Extract additional info from values
+            values = item.get('values', [])
+            if len(values) > 1:
+                # The second value often contains details
+                details = values[1]
+
+                # Parse enum details
+                if 'enum' in item_tags:
+                    if 'Base:' in details:
+                        base_part = details.split('Base:')
+                        if len(base_part) > 1:
+                            data['base_type'] = base_part[1].strip()
+
+                    # Try to get child items (enum values)
+                    data['values'] = []
+                    child_ids = self.tree.get_children(item_id)
+                    for child_id in child_ids:
+                        child = self.tree.item(child_id)
+                        if 'enumvalue' in child.get('tags', []):
+                            value_data = {
+                                'name': child.get('text', ''),
+                                'value': ''
+                            }
+                            # Try to extract value from child details
+                            child_values = child.get('values', [])
+                            if len(child_values) > 1:
+                                child_details = child_values[1]
+                                if 'Value:' in child_details:
+                                    val_part = child_details.split('Value:')
+                                    if len(val_part) > 1:
+                                        value_data['value'] = val_part[1].strip()
+                            data['values'].append(value_data)
+
+            return data
+
+        except Exception as e:
+            self.logger.error(f"Error extracting item data: {str(e)}")
+            return None

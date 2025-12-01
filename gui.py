@@ -1,42 +1,40 @@
 """
-Main GUI module for Codesys XML Parser using tkinter
-Simplified version that delegates to specialized modules
+Main GUI for Codesys XML Documentation Generator
 """
 
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, simpledialog
+from tkinter import ttk, filedialog
 import logging
 import os
-import json
 from pathlib import Path
-from gui_tree_manager import TreeManager
-from gui_details_manager import DetailsManager
+from datetime import datetime
+import traceback
 
-class XMLParserGUI:
-    """Main GUI for Codesys XML Parser with modular architecture"""
+from data_models import *
+from xml_parser import CodesysXmlParser
+from tree_display import TreeDisplayManager
+from export_manager import ExportManager
+from uml_generator import UMLGenerator
 
-    def __init__(self, generator):
-        self.generator = generator
+
+class CodesysXmlDocumenter:
+    """Main GUI application"""
+
+    def __init__(self):
         self.logger = logging.getLogger('CodesysXMLDocGenerator.GUI')
-        self.logger.debug("XMLParserGUI initializing")
-
-        # Initialize instance variables
-        self.current_parser = None
-        self.json_data = None
-        self.selected_xml_file = None
+        self.xml_parser = CodesysXmlParser(self.logger)
+        self.xml_export = None
 
         # Create main window
         self.root = tk.Tk()
-        self.root.title("Codesys PLCopen XML Documentation Generator - Modular Architecture")
-        self.root.geometry("1200x900")
+        self.root.title("Codesys PLCopen XML Documentation Generator")
+        self.root.geometry("1200x800")
 
         self._setup_gui()
-        self.logger.info("XMLParserGUI initialized successfully")
+        self.logger.info("GUI initialized")
 
     def _setup_gui(self):
-        """Setup the main GUI components"""
-        self.logger.debug("Setting up main GUI components")
-
+        """Setup the GUI components"""
         # Main frame
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -47,236 +45,648 @@ class XMLParserGUI:
         main_frame.columnconfigure(1, weight=1)
         main_frame.rowconfigure(2, weight=1)
 
-        # File selection section
+        # File selection
         file_frame = ttk.LabelFrame(main_frame, text="1. XML File Selection", padding="5")
-        file_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        file_frame.grid(row=0, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
         file_frame.columnconfigure(1, weight=1)
 
         ttk.Label(file_frame, text="XML File:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
 
         self.file_path_var = tk.StringVar()
-        self.file_entry = ttk.Entry(file_frame, textvariable=self.file_path_var, state='readonly')
+        self.file_entry = ttk.Entry(file_frame, textvariable=self.file_path_var, width=60, state='readonly')
         self.file_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 5))
 
-        ttk.Button(file_frame, text="Browse", command=self._browse_file).grid(row=0, column=2)
-        ttk.Button(file_frame, text="Load & Parse XML", command=self._load_and_parse_xml).grid(row=0, column=3, padx=(5, 0))
+        ttk.Button(file_frame, text="Browse", command=self._browse_file).grid(row=0, column=2, padx=(0, 5))
+        ttk.Button(file_frame, text="Load & Parse", command=self._load_and_parse).grid(row=0, column=3)
 
-        # Export button in file frame
-        ttk.Button(file_frame, text="Export Selected Item", command=self.export_current_item).grid(row=0, column=4, padx=(10, 0))
+        # Information panel
+        info_frame = ttk.LabelFrame(main_frame, text="2. Export Information", padding="5")
+        info_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
 
-        # XML info section
-        info_frame = ttk.LabelFrame(main_frame, text="2. XML Information", padding="5")
-        info_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
-
-        # Create a grid for info labels (2 rows, 4 columns)
-        ttk.Label(info_frame, text="XML Type:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
-        self.xml_type_var = tk.StringVar(value="Not loaded")
-        ttk.Label(info_frame, textvariable=self.xml_type_var, foreground="blue").grid(row=0, column=1, sticky=tk.W)
+        # Info grid
+        ttk.Label(info_frame, text="Export Type:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        self.export_type_var = tk.StringVar(value="Not loaded")
+        ttk.Label(info_frame, textvariable=self.export_type_var, foreground="blue").grid(row=0, column=1, sticky=tk.W)
 
         ttk.Label(info_frame, text="Data Types:").grid(row=0, column=2, sticky=tk.W, padx=(20, 5))
-        self.data_types_count_var = tk.StringVar(value="0")
-        ttk.Label(info_frame, textvariable=self.data_types_count_var).grid(row=0, column=3, sticky=tk.W)
+        self.data_types_var = tk.StringVar(value="0")
+        ttk.Label(info_frame, textvariable=self.data_types_var).grid(row=0, column=3, sticky=tk.W)
 
-        ttk.Label(info_frame, text="POUs:").grid(row=0, column=4, sticky=tk.W, padx=(20, 5))
-        self.pous_count_var = tk.StringVar(value="0")
-        ttk.Label(info_frame, textvariable=self.pous_count_var).grid(row=0, column=5, sticky=tk.W)
+        ttk.Label(info_frame, text="Enums:").grid(row=0, column=4, sticky=tk.W, padx=(20, 5))
+        self.enums_var = tk.StringVar(value="0")
+        ttk.Label(info_frame, textvariable=self.enums_var).grid(row=0, column=5, sticky=tk.W)
 
-        ttk.Label(info_frame, text="Global Vars:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5))
-        self.global_vars_count_var = tk.StringVar(value="0")
-        ttk.Label(info_frame, textvariable=self.global_vars_count_var).grid(row=1, column=1, sticky=tk.W)
+        ttk.Label(info_frame, text="POUs:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5))
+        self.pous_var = tk.StringVar(value="0")
+        ttk.Label(info_frame, textvariable=self.pous_var).grid(row=1, column=1, sticky=tk.W)
 
-        ttk.Label(info_frame, text="Enums:").grid(row=1, column=2, sticky=tk.W, padx=(20, 5))
-        self.enums_count_var = tk.StringVar(value="0")
-        ttk.Label(info_frame, textvariable=self.enums_count_var).grid(row=1, column=3, sticky=tk.W)
+        ttk.Label(info_frame, text="Structures:").grid(row=1, column=2, sticky=tk.W, padx=(20, 5))
+        self.structures_var = tk.StringVar(value="0")
+        ttk.Label(info_frame, textvariable=self.structures_var).grid(row=1, column=3, sticky=tk.W)
 
         ttk.Label(info_frame, text="Unions:").grid(row=1, column=4, sticky=tk.W, padx=(20, 5))
-        self.unions_count_var = tk.StringVar(value="0")
-        ttk.Label(info_frame, textvariable=self.unions_count_var).grid(row=1, column=5, sticky=tk.W)
+        self.unions_var = tk.StringVar(value="0")
+        ttk.Label(info_frame, textvariable=self.unions_var).grid(row=1, column=5, sticky=tk.W)
 
-        ttk.Label(info_frame, text="Structures:").grid(row=1, column=6, sticky=tk.W, padx=(20, 5))
-        self.structures_count_var = tk.StringVar(value="0")
-        ttk.Label(info_frame, textvariable=self.structures_count_var).grid(row=1, column=7, sticky=tk.W)
+        ttk.Label(info_frame, text="Total Items:").grid(row=1, column=6, sticky=tk.W, padx=(20, 5))
+        self.total_var = tk.StringVar(value="0")
+        ttk.Label(info_frame, textvariable=self.total_var, font=('TkDefaultFont', 9, 'bold')).grid(row=1, column=7,
+                                                                                                   sticky=tk.W)
 
-        # Tree view for content selection
-        tree_frame = ttk.LabelFrame(main_frame, text="3. Browse Structure (Click to select, Double-click to expand)", padding="5")
+        # Tree display
+        tree_frame = ttk.LabelFrame(main_frame, text="3. Structure Browser", padding="5")
         tree_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
         tree_frame.columnconfigure(0, weight=1)
         tree_frame.rowconfigure(0, weight=1)
 
-        # Create treeview with scrollbar
+        # Tree with scrollbar
         tree_scroll = ttk.Scrollbar(tree_frame)
         tree_scroll.grid(row=0, column=1, sticky=(tk.N, tk.S))
 
-        self.tree = ttk.Treeview(tree_frame, columns=('type', 'details'), show='tree headings', yscrollcommand=tree_scroll.set)
+        self.tree = ttk.Treeview(tree_frame, columns=('type', 'details'),
+                                 show='tree headings', yscrollcommand=tree_scroll.set)
         self.tree.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-
-        # Configure tree columns
-        self.tree.heading('#0', text='Name')
-        self.tree.heading('type', text='Type')
-        self.tree.heading('details', text='Details')
-
-        self.tree.column('#0', width=400)
-        self.tree.column('type', width=150)
-        self.tree.column('details', width=300)
 
         tree_scroll.config(command=self.tree.yview)
 
+        # Initialize tree display manager
+        self.tree_display = TreeDisplayManager(self.tree, self.logger)
+
+        # Right-click menu
+        self.tree_menu = tk.Menu(self.root, tearoff=0)
+        self.tree_menu.add_command(label="Export Item", command=self._export_selected_item)
+        self.tree_menu.add_command(label="Expand All", command=self.tree_display.expand_all)
+        self.tree_menu.add_command(label="Collapse All", command=self.tree_display.collapse_all)
+        self.tree.bind("<Button-3>", self._show_tree_menu)
+
         # Details panel
         details_frame = ttk.LabelFrame(main_frame, text="4. Item Details", padding="5")
-        details_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        details_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
         details_frame.columnconfigure(0, weight=1)
-        details_frame.rowconfigure(0, weight=1)
 
-        self.details_text = tk.Text(details_frame, height=12, wrap=tk.WORD)
+        self.details_text = tk.Text(details_frame, height=10, wrap=tk.WORD)
         details_scroll = ttk.Scrollbar(details_frame, command=self.details_text.yview)
         self.details_text.config(yscrollcommand=details_scroll.set)
 
         self.details_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         details_scroll.grid(row=0, column=1, sticky=(tk.N, tk.S))
 
-        # Initialize managers
-        self.tree_manager = TreeManager(self.tree, self.logger)
-        self.details_manager = DetailsManager(self.details_text, self.logger)
+        # Export options
+        export_frame = ttk.LabelFrame(main_frame, text="5. Export Options", padding="5")
+        export_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
+        # In the export_frame section, add:
+        ttk.Button(export_frame, text="Export UML",
+                   command=self._export_uml_for_selected).grid(row=0, column=4, padx=5)
+        ttk.Label(export_frame, text="Format:").grid(row=0, column=0, padx=(0, 5))
+        self.format_var = tk.StringVar(value="html")
+        format_combo = ttk.Combobox(export_frame, textvariable=self.format_var,
+                                    values=["text", "html", "json"], state="readonly", width=10)
+        format_combo.grid(row=0, column=1, padx=(0, 10))
 
-        # Bind events
-        self.tree.bind('<Double-1>', self._on_tree_double_click)
-        self.tree.bind('<<TreeviewSelect>>', self._on_tree_select)
+        ttk.Button(export_frame, text="Export Selected",
+                   command=self._export_selected_item).grid(row=0, column=2, padx=5)
+        ttk.Button(export_frame, text="Export All",
+                   command=self._export_all).grid(row=0, column=3, padx=5)
 
         # Status bar
         self.status_var = tk.StringVar(value="Ready to load XML file")
         status_bar = ttk.Label(main_frame, textvariable=self.status_var, relief=tk.SUNKEN)
-        status_bar.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 0))
+        status_bar.grid(row=5, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(5, 0))
 
-        self.logger.debug("Main GUI components setup completed")
+        # Bind events
+        self.tree.bind('<<TreeviewSelect>>', self._on_tree_select)
 
     def _browse_file(self):
         """Browse for XML file"""
-        self.logger.debug("File browse dialog opened")
         filename = filedialog.askopenfilename(
             title="Select Codesys PLCopen XML File",
             filetypes=[("XML files", "*.xml"), ("All files", "*.*")]
         )
         if filename:
             self.file_path_var.set(filename)
-            self.selected_xml_file = filename
-            self.logger.info(f"Selected XML file: {filename}")
+            self.logger.info(f"Selected file: {filename}")
 
-    def _load_and_parse_xml(self):
-        """Load, parse the selected XML file and display in tree"""
-        if not self.selected_xml_file:
-            messagebox.showwarning("Warning", "Please select an XML file first.")
+    def _load_and_parse(self):
+        """Load and parse the XML file"""
+        file_path = self.file_path_var.get()
+        if not file_path or not os.path.exists(file_path):
+            self.logger.warning("Please select a valid XML file.")
+            self.status_var.set("Error: Please select a valid XML file.")
             return
 
-        self.logger.info(f"Loading and parsing XML file: {self.selected_xml_file}")
-        self.status_var.set("Loading and parsing XML file...")
+        self.status_var.set("Parsing XML file...")
         self.root.update()
 
         try:
-            # Clear existing tree and details
-            self.tree_manager.clear_tree()
-            self.details_manager.clear_details()
+            # Parse XML file
+            self.xml_export = self.xml_parser.parse_file(file_path)
 
-            # Parse XML file and get JSON data
-            self.current_parser, self.json_data = self.generator.parse_xml_file(self.selected_xml_file)
+            # Update information display
+            export_type_str = self.xml_export.export_type.value.upper()
+            self.export_type_var.set(export_type_str)
+            self.logger.info(f"Export type: {export_type_str}")
 
-            # Update XML type information
-            detection_result = self.generator.detect_xml_type_and_structure(self.selected_xml_file)
-            xml_type = detection_result['type']
-            self.xml_type_var.set(f"{xml_type.upper()} Export")
+            summary = self.xml_export.get_summary()
+            self.data_types_var.set(str(summary['data_types']))
+            self.enums_var.set(str(summary['enums']))
+            self.pous_var.set(str(summary['pous']))
+            self.structures_var.set(str(summary['structures']))
+            self.unions_var.set(str(summary['unions']))
+            self.total_var.set(str(summary['total_items']))
 
-            # Update counts
-            summary = self.json_data.get('summary', {})
-            self.data_types_count_var.set(str(summary.get('data_types_count', 0)))
-            self.pous_count_var.set(str(summary.get('pous_count', 0)))
-            self.global_vars_count_var.set(str(summary.get('global_vars_count', 0)))
-            self.enums_count_var.set(str(summary.get('enums_count', 0)))
-            self.unions_count_var.set(str(summary.get('unions_count', 0)))
-            self.structures_count_var.set(str(summary.get('structures_count', 0)))
+            # Display in tree
+            self.tree_display.display_xml_export(self.xml_export)
 
-            # Display JSON data in tree
-            self.tree_manager.display_json_in_tree(self.json_data)
-
-            # Update details manager with JSON data
-            self.details_manager.set_json_data(self.json_data)
-
-            self.status_var.set(f"XML parsed successfully - Ready for browsing")
-            self.logger.info(f"XML parsed successfully, JSON data loaded")
+            success_msg = f"Loaded {summary['total_items']} items successfully ({export_type_str})"
+            self.status_var.set(success_msg)
+            self.logger.info(success_msg)
 
         except Exception as e:
-            error_msg = f"Error processing XML file: {str(e)}"
+            error_msg = f"Error parsing XML file: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
-            messagebox.showerror("Error", error_msg)
-            self.status_var.set("Error processing XML file")
-
-    def _on_tree_double_click(self, event):
-        """Handle tree double-click for expand/collapse"""
-        self.tree_manager.handle_double_click(event)
+            self.status_var.set(f"Error: {str(e)}")
 
     def _on_tree_select(self, event):
-        """Handle tree item selection and display details"""
-        try:
-            selected_item = self.tree_manager.get_selected_item()
-            if selected_item:
-                self.details_manager.show_item_details(selected_item, self.tree_manager.tree)
-        except Exception as e:
-            error_msg = f"Error handling tree selection: {str(e)}"
-            self.logger.error(error_msg, exc_info=True)
-            self.details_manager.clear_details()
-            self.details_manager.details_text.insert(tk.END, f"Error: {str(e)}")
-
-    def export_current_item(self):
-        """Export the currently selected item"""
-        selected_item = self.tree_manager.get_selected_item()
-        if not selected_item:
-            messagebox.showwarning("Warning", "Please select an item to export.")
+        """Handle tree selection"""
+        selected = self.tree_display.get_selected_item()
+        if not selected:
             return
+
+        # Clear details
+        self.details_text.delete('1.0', tk.END)
+
+        # Show basic info
+        self.details_text.insert(tk.END, f"Name: {selected['text']}\n")
+        self.details_text.insert(tk.END, f"Type: {selected['values'][0] if selected['values'] else 'Unknown'}\n")
+
+        if len(selected['values']) > 1:
+            self.details_text.insert(tk.END, f"Details: {selected['values'][1]}\n")
+
+    def _show_tree_menu(self, event):
+        """Show right-click menu on tree"""
+        try:
+            item = self.tree.identify_row(event.y)
+            if item:
+                self.tree.selection_set(item)
+                self.tree_menu.post(event.x_root, event.y_root)
+        except Exception as e:
+            self.logger.debug(f"Error showing tree menu: {str(e)}")
+
+
+
+
+
+
+    def _add_type_to_export(self, type_data, temp_export):
+        """Add a type to the export if not already present"""
+        if isinstance(type_data, EnumType):
+            if not any(e.name == type_data.name for e in temp_export.enums):
+                temp_export.enums.append(type_data)
+        elif isinstance(type_data, StructureType):
+            if type_data.is_union:
+                if not any(u.name == type_data.name for u in temp_export.unions):
+                    temp_export.unions.append(type_data)
+            else:
+                if not any(s.name == type_data.name for s in temp_export.structures):
+                    temp_export.structures.append(type_data)
+        elif isinstance(type_data, DataType):
+            if not any(d.name == type_data.name for d in temp_export.data_types):
+                temp_export.data_types.append(type_data)
+
+    def _find_item_data(self, selected_item):
+        """Find the data object for the selected tree item"""
+        if not self.xml_export:
+            return None
 
         item_name = selected_item['text']
-        item_tags = selected_item['tags']
+        tags = selected_item['tags']
 
-        # Determine item type from tags
-        item_type = None
-        type_mapping = {
-            'datatype': 'dataType',
-            'pou': 'pou',
-            'enum': 'enum',
-            'union': 'union',
-            'structure': 'structure',
-            'globalvar': 'global_var'
-        }
+        if 'enum' in tags:
+            for enum in self.xml_export.enums:
+                if enum.name == item_name:
+                    return enum
 
-        for tag in item_tags:
-            if tag in type_mapping:
-                item_type = type_mapping[tag]
-                break
+        elif 'datatype' in tags:
+            for data_type in self.xml_export.data_types:
+                if data_type.name == item_name:
+                    return data_type
 
-        if not item_type:
-            messagebox.showwarning("Warning",
-                                "Selected item cannot be exported. Please select a:\n"
-                                "- Data Type\n- POU\n- Enum\n- Union\n- Structure\n- Global Variable")
+        elif 'structure' in tags:
+            for structure in self.xml_export.structures:
+                if structure.name == item_name:
+                    return structure
+
+        elif 'union' in tags:
+            for union in self.xml_export.unions:
+                if union.name == item_name:
+                    return union
+
+        elif 'pou' in tags:
+            for pou in self.xml_export.pous:
+                if pou.name == item_name:
+                    return pou
+
+        elif 'globalvar' in tags:
+            for global_var in self.xml_export.global_variables:
+                if global_var.name == item_name:
+                    return global_var
+
+        return None
+
+    def _export_all(self):
+        """Export all items"""
+        if not self.xml_export:
+            self.logger.warning("No data loaded. Please load an XML file first.")
+            self.status_var.set("Warning: No data loaded. Please load an XML file first.")
             return
 
-        # Ask for format
-        format_choice = simpledialog.askstring("Export Format",
-                                             "Enter export format (text/html/json):",
-                                             initialvalue="text")
-        if format_choice and format_choice.lower() in ['text', 'html', 'json']:
-            try:
-                filename = self.details_manager.export_item_structure(item_name, item_type, format_choice.lower())
-                if filename:
-                    messagebox.showinfo("Export Successful", f"Documentation exported to:\n{filename}")
-                else:
-                    messagebox.showerror("Export Failed", "Failed to export documentation. Check logs for details.")
-            except Exception as e:
-                messagebox.showerror("Export Error", f"Export failed: {str(e)}")
-        else:
-            messagebox.showwarning("Warning", "Invalid format. Use 'text', 'html', or 'json'.")
+        # Get export format
+        format_choice = self.format_var.get().lower()
+
+        # Get output directory
+        output_dir = Path("exports")
+        output_dir.mkdir(exist_ok=True)
+
+        # Export using ExportManager
+        export_manager = ExportManager(self.logger)
+
+        try:
+            self.status_var.set("Starting export of all items...")
+            self.root.update()
+
+            # RESOLVE TYPE REFERENCES FIRST
+            self.logger.debug("Resolving all type references...")
+            self.xml_export.resolve_all_type_references()
+
+            # Export everything
+            exported_files = export_manager.export_all(self.xml_export, str(output_dir), format_choice)
+
+            if exported_files:
+                success_msg = f"Exported {len(exported_files)} files successfully to exports folder"
+                self.logger.info(success_msg)
+                self.status_var.set(success_msg)
+
+                # Log summary
+                summary = self.xml_export.get_summary()
+                self.logger.info(f"Export summary:")
+                self.logger.info(f"  - Unions: {summary['unions']}")
+                self.logger.info(f"  - Structures: {summary['structures']}")
+                self.logger.info(f"  - Enums: {summary['enums']}")
+                self.logger.info(f"  - POUs: {summary['pous']}")
+                self.logger.info(f"  - Data Types: {summary['data_types']}")
+                self.logger.info(f"  - Global Variables: {summary['global_variables']}")
+            else:
+                error_msg = f"Export failed: {export_manager.error_count} errors"
+                self.logger.error(error_msg)
+                self.status_var.set(error_msg)
+
+        except Exception as e:
+            error_msg = f"Export failed: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            self.status_var.set(f"Error: {str(e)}")
+
+    def _open_file(self, filepath):
+        """Open a file with default application"""
+        try:
+            import os
+            import sys
+            import subprocess
+
+            if sys.platform == 'win32':
+                os.startfile(filepath)
+            elif sys.platform == 'darwin':
+                subprocess.call(['open', filepath])
+            else:
+                subprocess.call(['xdg-open', filepath])
+        except Exception as e:
+            self.logger.debug(f"Could not open file {filepath}: {str(e)}")
+
+    def _export_selected_item(self):
+        """Export only the selected item"""
+        selected = self.tree_display.get_selected_item()
+        if not selected:
+            self.logger.warning("Please select an item to export.")
+            self.status_var.set("Warning: Please select an item to export.")
+            return
+
+        # Check if it's an exportable item (not a category)
+        tags = selected['tags']
+        if 'category' in tags or 'subcategory' in tags:
+            self.logger.warning("Please select a specific item, not a category.")
+            self.status_var.set("Warning: Please select a specific item, not a category.")
+            return
+
+        # Find the actual data object
+        item_data = self._find_item_data(selected)
+        if not item_data:
+            self.logger.error("Could not find data for selected item.")
+            self.status_var.set("Error: Could not find data for selected item.")
+            return
+
+        # Get export format
+        format_choice = self.format_var.get().lower()
+
+        # Get output directory
+        output_dir = Path("exports")
+        output_dir.mkdir(exist_ok=True)
+
+        # Create a temporary XmlExport with only the selected item
+        temp_export = XmlExport(
+            export_type=self.xml_export.export_type,
+            file_path=self.xml_export.file_path
+        )
+
+        # Add the selected item to temp_export FIRST
+        item_type = None
+        if isinstance(item_data, StructureType):
+            if item_data.is_union:
+                temp_export.unions.append(item_data)
+                item_type = 'union'
+                self.logger.debug(f"Added union {item_data.name} to temp_export")
+            else:
+                temp_export.structures.append(item_data)
+                item_type = 'structure'
+                self.logger.debug(f"Added structure {item_data.name} to temp_export")
+        elif isinstance(item_data, EnumType):
+            temp_export.enums.append(item_data)
+            item_type = 'enum'
+            self.logger.debug(f"Added enum {item_data.name} to temp_export")
+        elif isinstance(item_data, Pou):
+            temp_export.pous.append(item_data)
+            item_type = 'pou'
+            self.logger.debug(f"Added POU {item_data.name} to temp_export")
+        elif isinstance(item_data, DataType):
+            temp_export.data_types.append(item_data)
+            item_type = 'datatype'
+            self.logger.debug(f"Added data type {item_data.name} to temp_export")
+        elif isinstance(item_data, GlobalVariable):
+            temp_export.global_variables.append(item_data)
+            item_type = 'globalvar'
+            self.logger.debug(f"Added global variable {item_data.name} to temp_export")
+
+        if not item_type:
+            self.logger.error(f"Unknown item type: {type(item_data)}")
+            self.status_var.set("Error: Unknown item type")
+            return
+
+        # Debug logging AFTER adding the main item
+        self.logger.debug(f"Temp export after adding main item {item_data.name}:")
+        self.logger.debug(f"  Unions: {len(temp_export.unions)}")
+        self.logger.debug(f"  Structures: {len(temp_export.structures)}")
+        self.logger.debug(f"  Enums: {len(temp_export.enums)}")
+        self.logger.debug(f"  Data Types: {len(temp_export.data_types)}")
+
+        # Also add any referenced types to the export so they can be resolved
+        self._add_referenced_types(item_data, temp_export)
+
+        # Debug logging AFTER adding referenced types
+        self.logger.debug(f"Temp export after adding referenced types:")
+        self.logger.debug(f"  Unions: {len(temp_export.unions)}")
+        self.logger.debug(f"  Structures: {len(temp_export.structures)}")
+        self.logger.debug(f"  Enums: {len(temp_export.enums)}")
+        self.logger.debug(f"  Data Types: {len(temp_export.data_types)}")
+
+        # Log what enums are in temp_export
+        for enum in temp_export.enums:
+            self.logger.debug(f"    Enum: {enum.name} with {len(enum.values)} values")
+
+        # Log what unions are in temp_export
+        for union in temp_export.unions:
+            self.logger.debug(f"    Union: {union.name} with {len(union.members)} members")
+
+        # Export using ExportManager
+        export_manager = ExportManager(self.logger)
+
+        try:
+            # RESOLVE TYPE REFERENCES FIRST
+            self.logger.debug(f"Resolving type references for {selected['text']}...")
+            temp_export.resolve_all_type_references()
+
+            # Export only this item
+            self.status_var.set(f"Exporting {selected['text']}...")
+            self.root.update()
+
+            # Export the single item
+            exported_files = export_manager.export_all(temp_export.to_dict(), str(output_dir))
+
+
+            if exported_files.get('files') and len(exported_files['files']) > 0:
+                first_file = exported_files['files'][0]
+                success_msg = f"Exported {selected['text']} to {first_file.get('path', 'unknown')}"
+            else:
+                success_msg = f"Exported {selected['text']} but no files were created"
+
+
+        except Exception as e:
+            error_msg = f"Export failed: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            self.status_var.set(f"Error: {str(e)}")
+
+    def _add_referenced_types(self, item_data, temp_export):
+        """Add referenced types to the export so they can be resolved"""
+        if not self.xml_export:
+            return
+
+        # Get type registry from full export
+        type_registry = self.xml_export.get_all_types()
+        self.logger.debug(f"Full type registry has {len(type_registry)} total types")
+
+        # Create a case-insensitive lookup
+        type_lookup = {name.lower(): (name, type_obj) for name, type_obj in type_registry.items()}
+
+        # Track types we've already added to avoid infinite recursion
+        added_types = set()
+
+        def add_type_recursive(type_name):
+            """Recursively add types with case-insensitive matching"""
+            if type_name in added_types:
+                return
+
+            # Try case-insensitive lookup
+            lookup_key = type_name.lower()
+            if lookup_key in type_lookup:
+                actual_name, ref_type = type_lookup[lookup_key]
+                self.logger.debug(
+                    f"  Found type '{type_name}' -> actual name '{actual_name}' ({type(ref_type).__name__})")
+                self._add_type_to_export(ref_type, temp_export)
+                added_types.add(type_name)
+
+                # If it's a structure/union, also add its member types
+                if isinstance(ref_type, StructureType):
+                    for member in ref_type.members:
+                        if member.type and member.type.lower() != type_name.lower():
+                            add_type_recursive(member.type)
+            else:
+                self.logger.debug(f"  Type '{type_name}' not found in registry (case-insensitive)")
+
+        if isinstance(item_data, StructureType):
+            self.logger.debug(f"Processing structure/union: {item_data.name} with {len(item_data.members)} members")
+            # For structures/unions, add all member types
+            for member in item_data.members:
+                if member.type and member.type.lower() != item_data.name.lower():
+                    self.logger.debug(f"  Looking for member type: {member.type}")
+                    add_type_recursive(member.type)
+
+        elif isinstance(item_data, Pou):
+            # For POUs, add variable types
+            for variable in item_data.variables:
+                if variable.type:
+                    add_type_recursive(variable.type)
+
+    def _export_uml_for_selected(self):
+        """Export UML diagram for selected item"""
+        selected = self.tree_display.get_selected_item()
+        if not selected:
+            self.logger.warning("Please select an item to export.")
+            self.status_var.set("Warning: Please select an item to export.")
+            return
+
+        # Check if it's a union
+        tags = selected['tags']
+        if 'union' not in tags:
+            self.logger.warning("UML export is only available for unions.")
+            self.status_var.set("Warning: Please select a union for UML export.")
+            return
+
+        # Find the actual data object
+        item_data = self._find_item_data(selected)
+        if not item_data or not isinstance(item_data, StructureType) or not item_data.is_union:
+            self.logger.error("Could not find union data for selected item.")
+            self.status_var.set("Error: Could not find union data.")
+            return
+
+        # Get output directory
+        output_dir = Path("uml_exports")
+        output_dir.mkdir(exist_ok=True)
+
+        # Generate UML
+        uml_generator = UMLGenerator(self.logger)
+        try:
+            self.status_var.set(f"Generating UML for {selected['text']}...")
+            self.root.update()
+
+            # Call the UML generator method - FIXED VERSION
+            # First, let's check what methods are available
+            self.logger.debug(
+                f"UMLGenerator methods: {[m for m in dir(uml_generator) if not m.startswith('_') and 'uml' in m.lower()]}")
+
+            # Try to call the method with the correct parameters
+            html_file = None
+
+            # Method 1: Try the standard method name
+            if hasattr(uml_generator, 'generate_uml_for_union'):
+                self.logger.debug("Using generate_uml_for_union method")
+                try:
+                    html_file = uml_generator.generate_uml_for_union(item_data, self.xml_export, output_dir)
+                except TypeError as e:
+                    self.logger.warning(f"Method call failed: {str(e)}")
+                    # Try with fewer parameters
+                    try:
+                        html_file = uml_generator.generate_uml_for_union(item_data, output_dir)
+                    except Exception as e2:
+                        self.logger.error(f"Alternative call also failed: {str(e2)}")
+
+            # Method 2: Try any other UML method
+            if not html_file:
+                uml_methods = [m for m in dir(uml_generator)
+                               if callable(getattr(uml_generator, m)) and 'uml' in m.lower() and not m.startswith('_')]
+                for method_name in uml_methods:
+                    if method_name != 'generate_uml_for_union':  # Already tried this
+                        self.logger.debug(f"Trying alternative method: {method_name}")
+                        method = getattr(uml_generator, method_name)
+                        try:
+                            html_file = method(item_data, self.xml_export, output_dir)
+                            if html_file:
+                                break
+                        except TypeError:
+                            try:
+                                html_file = method(item_data, output_dir)
+                                if html_file:
+                                    break
+                            except Exception:
+                                continue
+                        except Exception:
+                            continue
+
+            if html_file and Path(html_file).exists():
+                success_msg = f"Generated UML diagram: {html_file}"
+                self.logger.info(success_msg)
+                self.status_var.set(success_msg)
+
+                # Option to open the file
+                self._open_file(html_file)
+            else:
+                # If no method worked, try to create a simple diagram manually
+                self.logger.warning("No UML method worked, creating simple diagram...")
+                try:
+                    # Create a simple PlantUML file directly
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    puml_file = output_dir / f"{item_data.name}_simple_{timestamp}.puml"
+
+                    # Generate simple PlantUML
+                    plantuml = f"""@startuml
+    title "{item_data.name}" - Union
+
+    class "{item_data.name}" <<union>> {{
+    """
+                    for member in item_data.members:
+                        initial_text = f" = {member.initial_value}" if member.initial_value else ""
+                        plantuml += f"  {member.name}: {member.type}{initial_text}\\n"
+
+                    plantuml += """}
+
+    @enduml"""
+
+                    with open(puml_file, 'w', encoding='utf-8') as f:
+                        f.write(plantuml)
+
+                    # Create simple HTML
+                    html_file = output_dir / f"{item_data.name}_simple_{timestamp}.html"
+                    html_content = f"""<!DOCTYPE html>
+    <html>
+    <head>
+        <title>{item_data.name} - UML Diagram</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 40px; }}
+            h1 {{ color: #333; }}
+            pre {{ background: #f5f5f5; padding: 20px; border-radius: 5px; }}
+        </style>
+    </head>
+    <body>
+        <h1>{item_data.name} - Union</h1>
+        <h2>PlantUML Code:</h2>
+        <pre>{plantuml}</pre>
+        <h2>Members:</h2>
+        <ul>
+    """
+                    for member in item_data.members:
+                        html_content += f"<li><strong>{member.name}</strong>: {member.type}</li>\\n"
+
+                    html_content += f"""    </ul>
+        <p><em>Copy the PlantUML code above to <a href="https://www.plantuml.com/plantuml/uml/">plantuml.com</a> to view the diagram.</em></p>
+        <p>Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
+    </body>
+    </html>"""
+
+                    with open(html_file, 'w', encoding='utf-8') as f:
+                        f.write(html_content)
+
+                    success_msg = f"Generated simple UML diagram: {html_file}"
+                    self.logger.info(success_msg)
+                    self.status_var.set(success_msg)
+                    self._open_file(str(html_file))
+
+                except Exception as fallback_error:
+                    error_msg = f"Failed to generate UML diagram: {str(fallback_error)}"
+                    self.logger.error(error_msg)
+                    self.status_var.set("Error: Failed to generate UML diagram")
+
+        except Exception as e:
+            error_msg = f"UML generation failed: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            self.status_var.set(f"Error: {str(e)}")
+
 
     def run(self):
-        """Start the GUI main loop"""
-        self.logger.info("Starting GUI main loop")
+        """Start the application"""
         self.root.mainloop()
-        self.logger.info("GUI main loop ended")
-
-if __name__ == "__main__":
-    print("This module is intended to be used with main.py")
