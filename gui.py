@@ -534,25 +534,25 @@ class CodesysXmlDocumenter:
                     add_type_recursive(variable.type)
 
     def _export_uml_for_selected(self):
-        """Export Mermaid UML diagram for selected item"""
+        """Export Mermaid UML diagram for selected item (union or enum)"""
         selected = self.tree_display.get_selected_item()
         if not selected:
             self.logger.warning("Please select an item to export.")
             self.status_var.set("Warning: Please select an item to export.")
             return
 
-        # Check if it's a union
+        # Check if it's a union or enum
         tags = selected['tags']
-        if 'union' not in tags:
-            self.logger.warning("UML export is only available for unions.")
-            self.status_var.set("Warning: Please select a union for UML export.")
+        if 'union' not in tags and 'enum' not in tags:
+            self.logger.warning("UML export is only available for unions or enums.")
+            self.status_var.set("Warning: Please select a union or enum for UML export.")
             return
 
         # Find the actual data object
         item_data = self._find_item_data(selected)
-        if not item_data or not isinstance(item_data, StructureType) or not item_data.is_union:
-            self.logger.error("Could not find union data for selected item.")
-            self.status_var.set("Error: Could not find union data.")
+        if not item_data:
+            self.logger.error("Could not find data for selected item.")
+            self.status_var.set("Error: Could not find data for selected item.")
             return
 
         # Get output directory
@@ -562,30 +562,62 @@ class CodesysXmlDocumenter:
         # Generate UML
         uml_generator = UMLGenerator(self.logger)
         try:
-            self.status_var.set(f"Generating Mermaid diagram for {selected['text']}...")
-            self.root.update()
+            # Generate appropriate diagram based on item type
+            if 'union' in tags and isinstance(item_data, StructureType) and item_data.is_union:
+                self.status_var.set(f"Generating Mermaid diagram for union: {selected['text']}...")
+                self.root.update()
 
-            self.logger.info(f"Generating Mermaid diagram for union: {item_data.name}")
+                self.logger.info(f"Generating Mermaid diagram for union: {item_data.name}")
 
-            # Call the Mermaid UML generator
-            html_file = uml_generator.generate_uml_for_union(item_data, self.xml_export, output_dir)
+                # Call the union UML generator
+                html_file = uml_generator.generate_uml_for_union(item_data, self.xml_export, output_dir)
 
-            if html_file and Path(html_file).exists():
-                success_msg = f"Generated Mermaid diagram: {html_file}"
-                self.logger.info(success_msg)
-                self.status_var.set(success_msg)
+                if html_file and Path(html_file).exists():
+                    success_msg = f"Generated Mermaid diagram for union: {html_file}"
+                    self.logger.info(success_msg)
+                    self.status_var.set(success_msg)
 
-                # Option to open the file
-                self._open_file(html_file)
+                    # Option to open the file
+                    self._open_file(html_file)
+                else:
+                    error_msg = "Failed to generate Mermaid diagram for union"
+                    self.logger.error(error_msg)
+                    self.status_var.set(f"Error: {error_msg}")
+
+            elif 'enum' in tags and isinstance(item_data, EnumType):
+                self.status_var.set(f"Generating Mermaid diagram for enum: {selected['text']}...")
+                self.root.update()
+
+                self.logger.info(
+                    f"Generating Mermaid diagram for enum: {item_data.name} with {len(item_data.values)} values")
+
+                # Call the enum UML generator
+                html_file = uml_generator.generate_uml_for_enum(item_data, output_dir)
+
+                if html_file and Path(html_file).exists():
+                    success_msg = f"Generated Mermaid diagram for enum: {html_file}"
+                    self.logger.info(success_msg)
+                    self.status_var.set(success_msg)
+
+                    # Option to open the file
+                    self._open_file(html_file)
+                else:
+                    error_msg = "Failed to generate Mermaid diagram for enum"
+                    self.logger.error(error_msg)
+                    self.status_var.set(f"Error: {error_msg}")
+
             else:
-                error_msg = "Failed to generate Mermaid diagram"
-                self.logger.error(error_msg)
-                self.status_var.set(f"Error: {error_msg}")
+                self.logger.warning(
+                    f"Selected item is not a supported type for UML export. Tags: {tags}, Type: {type(item_data)}")
+                self.status_var.set("Warning: Selected item type not supported for UML export.")
 
         except Exception as e:
             error_msg = f"Mermaid generation failed: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
             self.status_var.set(f"Error: {str(e)}")
+
+
+
     def run(self):
         """Start the application"""
         self.root.mainloop()
