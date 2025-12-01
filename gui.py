@@ -147,6 +147,26 @@ class CodesysXmlDocumenter:
                    command=self._export_selected_item).grid(row=0, column=2, padx=5)
         ttk.Button(export_frame, text="Export All",
                    command=self._export_all).grid(row=0, column=3, padx=5)
+        # In the export_frame section, replace or add:
+        ttk.Label(export_frame, text="UML Format:").grid(row=0, column=4, padx=(10, 5))
+
+        # Create a frame for UML buttons
+        uml_frame = ttk.Frame(export_frame)
+        uml_frame.grid(row=0, column=5, padx=5)
+
+        # Create buttons for different UML formats
+        ttk.Button(uml_frame, text="Flowchart",
+                   command=lambda: self._export_uml_for_selected("flowchart"),
+                   width=10).grid(row=0, column=0, padx=2)
+        ttk.Button(uml_frame, text="ER Diagram",
+                   command=lambda: self._export_uml_for_selected("er"),
+                   width=10).grid(row=0, column=1, padx=2)
+        ttk.Button(uml_frame, text="Class Diagram",
+                   command=lambda: self._export_uml_for_selected("class"),
+                   width=10).grid(row=0, column=2, padx=2)
+
+        # Add tooltips if you want
+        self._create_tooltip(uml_frame, "Export UML diagrams in different formats")
 
         # Status bar
         self.status_var = tk.StringVar(value="Ready to load XML file")
@@ -232,7 +252,11 @@ class CodesysXmlDocumenter:
         except Exception as e:
             self.logger.debug(f"Error showing tree menu: {str(e)}")
 
-
+    def _create_tooltip(self, widget, text):
+        """Create a tooltip for a widget (simple version)"""
+        # This is a simple implementation - you can enhance it if needed
+        widget.bind('<Enter>', lambda e: self.status_var.set(text))
+        widget.bind('<Leave>', lambda e: self.status_var.set(""))
 
 
 
@@ -533,19 +557,20 @@ class CodesysXmlDocumenter:
                 if variable.type:
                     add_type_recursive(variable.type)
 
-    def _export_uml_for_selected(self):
-        """Export Mermaid UML diagram for selected item (union or enum)"""
+    def _export_uml_for_selected(self, uml_format="flowchart"):
+        """Export UML diagram for selected item in specified format"""
         selected = self.tree_display.get_selected_item()
         if not selected:
             self.logger.warning("Please select an item to export.")
             self.status_var.set("Warning: Please select an item to export.")
             return
 
-        # Check if it's a union or enum
+        # Check if it's a structure, union, or enum
         tags = selected['tags']
-        if 'union' not in tags and 'enum' not in tags:
-            self.logger.warning("UML export is only available for unions or enums.")
-            self.status_var.set("Warning: Please select a union or enum for UML export.")
+
+        if 'union' not in tags and 'enum' not in tags and 'structure' not in tags:
+            self.logger.warning("UML export is only available for structures, unions, or enums.")
+            self.status_var.set("Warning: Please select a structure, union, or enum for UML export.")
             return
 
         # Find the actual data object
@@ -555,69 +580,94 @@ class CodesysXmlDocumenter:
             self.status_var.set("Error: Could not find data for selected item.")
             return
 
-        # Get output directory
-        output_dir = Path("uml_exports")
+        # Get output directory based on format
+        output_dir = Path(f"uml_exports_{uml_format}")
         output_dir.mkdir(exist_ok=True)
 
-        # Generate UML
-        uml_generator = UMLGenerator(self.logger)
         try:
+            # Import appropriate generator based on format
+            if uml_format == "flowchart":
+                from flowchart_generator import FlowchartGenerator
+                generator = FlowchartGenerator(self.logger)
+            elif uml_format == "er":
+                from erdiagram_generator import ERDiagramGenerator
+                generator = ERDiagramGenerator(self.logger)
+            elif uml_format == "class":
+                from classdiagram_generator import ClassDiagramGenerator
+                generator = ClassDiagramGenerator(self.logger)
+            else:
+                self.logger.error(f"Unknown UML format: {uml_format}")
+                self.status_var.set(f"Error: Unknown UML format: {uml_format}")
+                return
+
             # Generate appropriate diagram based on item type
-            if 'union' in tags and isinstance(item_data, StructureType) and item_data.is_union:
-                self.status_var.set(f"Generating Mermaid diagram for union: {selected['text']}...")
+            if 'structure' in tags and isinstance(item_data, StructureType) and not item_data.is_union:
+                self.status_var.set(f"Generating {uml_format} diagram for structure: {selected['text']}...")
                 self.root.update()
 
-                self.logger.info(f"Generating Mermaid diagram for union: {item_data.name}")
+                self.logger.info(f"Generating {uml_format} diagram for structure: {item_data.name}")
 
-                # Call the union UML generator
-                html_file = uml_generator.generate_uml_for_union(item_data, self.xml_export, output_dir)
-
-                if html_file and Path(html_file).exists():
-                    success_msg = f"Generated Mermaid diagram for union: {html_file}"
-                    self.logger.info(success_msg)
-                    self.status_var.set(success_msg)
-
-                    # Option to open the file
-                    self._open_file(html_file)
+                # Call the appropriate generator method
+                if hasattr(generator, 'generate_for_structure'):
+                    html_file = generator.generate_for_structure(item_data, self.xml_export, output_dir)
                 else:
-                    error_msg = "Failed to generate Mermaid diagram for union"
-                    self.logger.error(error_msg)
-                    self.status_var.set(f"Error: {error_msg}")
+                    self.logger.error(f"Generator doesn't support structure export: {type(generator).__name__}")
+                    self.status_var.set(f"Error: Generator doesn't support structure export")
+                    return
+
+            elif 'union' in tags and isinstance(item_data, StructureType) and item_data.is_union:
+                self.status_var.set(f"Generating {uml_format} diagram for union: {selected['text']}...")
+                self.root.update()
+
+                self.logger.info(f"Generating {uml_format} diagram for union: {item_data.name}")
+
+                # Call the appropriate generator method
+                if hasattr(generator, 'generate_for_union'):
+                    html_file = generator.generate_for_union(item_data, self.xml_export, output_dir)
+                else:
+                    self.logger.error(f"Generator doesn't support union export: {type(generator).__name__}")
+                    self.status_var.set(f"Error: Generator doesn't support union export")
+                    return
 
             elif 'enum' in tags and isinstance(item_data, EnumType):
-                self.status_var.set(f"Generating Mermaid diagram for enum: {selected['text']}...")
+                self.status_var.set(f"Generating {uml_format} diagram for enum: {selected['text']}...")
                 self.root.update()
 
-                self.logger.info(
-                    f"Generating Mermaid diagram for enum: {item_data.name} with {len(item_data.values)} values")
+                self.logger.info(f"Generating {uml_format} diagram for enum: {item_data.name}")
 
-                # Call the enum UML generator
-                html_file = uml_generator.generate_uml_for_enum(item_data, output_dir)
-
-                if html_file and Path(html_file).exists():
-                    success_msg = f"Generated Mermaid diagram for enum: {html_file}"
-                    self.logger.info(success_msg)
-                    self.status_var.set(success_msg)
-
-                    # Option to open the file
-                    self._open_file(html_file)
+                # Call the appropriate generator method
+                if hasattr(generator, 'generate_for_enum'):
+                    html_file = generator.generate_for_enum(item_data, output_dir)
                 else:
-                    error_msg = "Failed to generate Mermaid diagram for enum"
-                    self.logger.error(error_msg)
-                    self.status_var.set(f"Error: {error_msg}")
+                    self.logger.error(f"Generator doesn't support enum export: {type(generator).__name__}")
+                    self.status_var.set(f"Error: Generator doesn't support enum export")
+                    return
 
             else:
-                self.logger.warning(
-                    f"Selected item is not a supported type for UML export. Tags: {tags}, Type: {type(item_data)}")
+                self.logger.warning(f"Selected item is not a supported type for UML export.")
                 self.status_var.set("Warning: Selected item type not supported for UML export.")
+                return
 
+            if html_file and Path(html_file).exists():
+                success_msg = f"Generated {uml_format} diagram: {html_file}"
+                self.logger.info(success_msg)
+                self.status_var.set(success_msg)
+
+                # Option to open the file
+                self._open_file(html_file)
+            else:
+                error_msg = f"Failed to generate {uml_format} diagram"
+                self.logger.error(error_msg)
+                self.status_var.set(f"Error: {error_msg}")
+
+        except ImportError as e:
+            error_msg = f"Failed to import {uml_format} generator: {str(e)}"
+            self.logger.error(error_msg)
+            self.status_var.set(f"Error: {uml_format} generator not available")
         except Exception as e:
-            error_msg = f"Mermaid generation failed: {str(e)}"
+            error_msg = f"{uml_format} generation failed: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
             self.status_var.set(f"Error: {str(e)}")
-
-
-
     def run(self):
         """Start the application"""
         self.root.mainloop()
