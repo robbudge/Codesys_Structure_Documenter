@@ -134,9 +134,8 @@ class CodesysXmlDocumenter:
         # Export options
         export_frame = ttk.LabelFrame(main_frame, text="5. Export Options", padding="5")
         export_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
-        # In the export_frame section, add:
-        ttk.Button(export_frame, text="Export UML",
-                   command=self._export_uml_for_selected).grid(row=0, column=4, padx=5)
+
+        # Left side: Regular exports
         ttk.Label(export_frame, text="Format:").grid(row=0, column=0, padx=(0, 5))
         self.format_var = tk.StringVar(value="html")
         format_combo = ttk.Combobox(export_frame, textvariable=self.format_var,
@@ -147,14 +146,15 @@ class CodesysXmlDocumenter:
                    command=self._export_selected_item).grid(row=0, column=2, padx=5)
         ttk.Button(export_frame, text="Export All",
                    command=self._export_all).grid(row=0, column=3, padx=5)
-        # In the export_frame section, replace or add:
-        ttk.Label(export_frame, text="UML Format:").grid(row=0, column=4, padx=(10, 5))
+
+        # Right side: UML exports
+        ttk.Label(export_frame, text="UML:").grid(row=0, column=4, padx=(10, 5))
 
         # Create a frame for UML buttons
         uml_frame = ttk.Frame(export_frame)
         uml_frame.grid(row=0, column=5, padx=5)
 
-        # Create buttons for different UML formats
+        # UML buttons for selected item
         ttk.Button(uml_frame, text="Flowchart",
                    command=lambda: self._export_uml_for_selected("flowchart"),
                    width=10).grid(row=0, column=0, padx=2)
@@ -164,6 +164,11 @@ class CodesysXmlDocumenter:
         ttk.Button(uml_frame, text="Class Diagram",
                    command=lambda: self._export_uml_for_selected("class"),
                    width=10).grid(row=0, column=2, padx=2)
+
+        # Add Export All UML button
+        ttk.Button(export_frame, text="Export All Flowcharts",
+                   command=lambda: self._export_all_uml("flowchart"),
+                   width=18).grid(row=0, column=6, padx=(10, 5))
 
         # Add tooltips if you want
         self._create_tooltip(uml_frame, "Export UML diagrams in different formats")
@@ -258,9 +263,6 @@ class CodesysXmlDocumenter:
         widget.bind('<Enter>', lambda e: self.status_var.set(text))
         widget.bind('<Leave>', lambda e: self.status_var.set(""))
 
-
-
-
     def _add_type_to_export(self, type_data, temp_export):
         """Add a type to the export if not already present"""
         if isinstance(type_data, EnumType):
@@ -318,56 +320,138 @@ class CodesysXmlDocumenter:
         return None
 
     def _export_all(self):
-        """Export all items"""
+        """Export ALL items as flowcharts"""
         if not self.xml_export:
             self.logger.warning("No data loaded. Please load an XML file first.")
             self.status_var.set("Warning: No data loaded. Please load an XML file first.")
             return
 
-        # Get export format
-        format_choice = self.format_var.get().lower()
-
-        # Get output directory
-        output_dir = Path("exports")
+        # Get output directory for flowcharts
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = Path(f"flowchart_exports_all_{timestamp}")
         output_dir.mkdir(exist_ok=True)
 
-        # Export using ExportManager
-        export_manager = ExportManager(self.logger)
-
         try:
-            self.status_var.set("Starting export of all items...")
+            # Import FlowchartGenerator
+            from flowchart_generator import FlowchartGenerator
+            generator = FlowchartGenerator(self.logger)
+
+            # Track statistics
+            total_processed = 0
+            successful_exports = 0
+            failed_exports = []
+
+            # Export all structures
+            self.status_var.set(f"Exporting flowcharts for all structures ({len(self.xml_export.structures)})...")
             self.root.update()
 
-            # RESOLVE TYPE REFERENCES FIRST
-            self.logger.debug("Resolving all type references...")
-            self.xml_export.resolve_all_type_references()
+            for structure in self.xml_export.structures:
+                if not structure.is_union:  # Only actual structures, not unions
+                    total_processed += 1
+                    try:
+                        self.logger.info(f"Generating flowchart for structure: {structure.name}")
+                        result = generator.generate_for_structure(structure, self.xml_export, output_dir)
 
-            # Export everything
-            exported_files = export_manager.export_all(self.xml_export, str(output_dir), format_choice)
+                        # Handle tuple or string return
+                        if isinstance(result, tuple):
+                            html_path = result[0]
+                        else:
+                            html_path = result
 
-            if exported_files:
-                success_msg = f"Exported {len(exported_files)} files successfully to exports folder"
-                self.logger.info(success_msg)
-                self.status_var.set(success_msg)
+                        if html_path and Path(html_path).exists():
+                            successful_exports += 1
+                            self.logger.debug(f"Successfully exported {structure.name}")
+                        else:
+                            failed_exports.append(f"Structure: {structure.name}")
+                    except Exception as e:
+                        self.logger.error(f"Failed to export structure {structure.name}: {str(e)}")
+                        failed_exports.append(f"Structure: {structure.name}")
 
-                # Log summary
-                summary = self.xml_export.get_summary()
-                self.logger.info(f"Export summary:")
-                self.logger.info(f"  - Unions: {summary['unions']}")
-                self.logger.info(f"  - Structures: {summary['structures']}")
-                self.logger.info(f"  - Enums: {summary['enums']}")
-                self.logger.info(f"  - POUs: {summary['pous']}")
-                self.logger.info(f"  - Data Types: {summary['data_types']}")
-                self.logger.info(f"  - Global Variables: {summary['global_variables']}")
-            else:
-                error_msg = f"Export failed: {export_manager.error_count} errors"
-                self.logger.error(error_msg)
-                self.status_var.set(error_msg)
+            # Export all unions
+            self.status_var.set(f"Exporting flowcharts for all unions ({len(self.xml_export.unions)})...")
+            self.root.update()
 
+            for union in self.xml_export.unions:
+                total_processed += 1
+                try:
+                    self.logger.info(f"Generating flowchart for union: {union.name}")
+                    result = generator.generate_for_union(union, self.xml_export, output_dir)
+
+                    # Handle tuple or string return
+                    if isinstance(result, tuple):
+                        html_path = result[0]
+                    else:
+                        html_path = result
+
+                    if html_path and Path(html_path).exists():
+                        successful_exports += 1
+                        self.logger.debug(f"Successfully exported {union.name}")
+                    else:
+                        failed_exports.append(f"Union: {union.name}")
+                except Exception as e:
+                    self.logger.error(f"Failed to export union {union.name}: {str(e)}")
+                    failed_exports.append(f"Union: {union.name}")
+
+            # Export all enums
+            self.status_var.set(f"Exporting flowcharts for all enums ({len(self.xml_export.enums)})...")
+            self.root.update()
+
+            for enum in self.xml_export.enums:
+                total_processed += 1
+                try:
+                    self.logger.info(f"Generating flowchart for enum: {enum.name}")
+                    result = generator.generate_for_enum(enum, output_dir)
+
+                    # Handle tuple or string return
+                    if isinstance(result, tuple):
+                        html_path = result[0]
+                    else:
+                        html_path = result
+
+                    if html_path and Path(html_path).exists():
+                        successful_exports += 1
+                        self.logger.debug(f"Successfully exported {enum.name}")
+                    else:
+                        failed_exports.append(f"Enum: {enum.name}")
+                except Exception as e:
+                    self.logger.error(f"Failed to export enum {enum.name}: {str(e)}")
+                    failed_exports.append(f"Enum: {enum.name}")
+
+            # Show completion message
+            success_msg = f"Exported {successful_exports} of {total_processed} flowcharts to:\n{output_dir}"
+
+            if failed_exports:
+                success_msg += f"\n\nFailed to export {len(failed_exports)} items."
+                # Log failed items
+                for failed in failed_exports[:10]:  # Show first 10 failures
+                    self.logger.warning(f"Failed: {failed}")
+                if len(failed_exports) > 10:
+                    self.logger.warning(f"... and {len(failed_exports) - 10} more failures")
+
+            self.logger.info(f"Flowchart export complete: {successful_exports}/{total_processed} successful")
+            self.status_var.set(f"Exported {successful_exports} of {total_processed} flowcharts")
+
+            # Show summary dialog
+            from tkinter import messagebox
+            messagebox.showinfo(
+                "Export Complete",
+                f"Generated {successful_exports} of {total_processed} flowchart diagrams.\n\n"
+                f"Output folder: {output_dir}\n\n"
+                f"{'All exports successful!' if successful_exports == total_processed else f'{len(failed_exports)} exports failed. Check logs for details.'}"
+            )
+
+        except ImportError as e:
+            error_msg = f"Failed to import flowchart generator: {str(e)}"
+            self.logger.error(error_msg)
+            self.status_var.set(f"Error: Flowchart generator not available")
+            from tkinter import messagebox
+            messagebox.showerror("Export Error", error_msg)
         except Exception as e:
-            error_msg = f"Export failed: {str(e)}"
+            error_msg = f"Flowchart export failed: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
             self.status_var.set(f"Error: {str(e)}")
+            from tkinter import messagebox
+            messagebox.showerror("Export Error", error_msg)
 
     def _open_file(self, filepath):
         """Open a file with default application"""
@@ -609,7 +693,12 @@ class CodesysXmlDocumenter:
 
                 # Call the appropriate generator method
                 if hasattr(generator, 'generate_for_structure'):
-                    html_file = generator.generate_for_structure(item_data, self.xml_export, output_dir)
+                    result = generator.generate_for_structure(item_data, self.xml_export, output_dir)
+                    # Handle tuple or string return
+                    if isinstance(result, tuple):
+                        html_file = result[0]  # Get HTML path
+                    else:
+                        html_file = result
                 else:
                     self.logger.error(f"Generator doesn't support structure export: {type(generator).__name__}")
                     self.status_var.set(f"Error: Generator doesn't support structure export")
@@ -623,7 +712,12 @@ class CodesysXmlDocumenter:
 
                 # Call the appropriate generator method
                 if hasattr(generator, 'generate_for_union'):
-                    html_file = generator.generate_for_union(item_data, self.xml_export, output_dir)
+                    result = generator.generate_for_union(item_data, self.xml_export, output_dir)
+                    # Handle tuple or string return
+                    if isinstance(result, tuple):
+                        html_file = result[0]  # Get HTML path
+                    else:
+                        html_file = result
                 else:
                     self.logger.error(f"Generator doesn't support union export: {type(generator).__name__}")
                     self.status_var.set(f"Error: Generator doesn't support union export")
@@ -637,7 +731,12 @@ class CodesysXmlDocumenter:
 
                 # Call the appropriate generator method
                 if hasattr(generator, 'generate_for_enum'):
-                    html_file = generator.generate_for_enum(item_data, output_dir)
+                    result = generator.generate_for_enum(item_data, output_dir)
+                    # Handle tuple or string return
+                    if isinstance(result, tuple):
+                        html_file = result[0]  # Get HTML path
+                    else:
+                        html_file = result
                 else:
                     self.logger.error(f"Generator doesn't support enum export: {type(generator).__name__}")
                     self.status_var.set(f"Error: Generator doesn't support enum export")
@@ -648,6 +747,7 @@ class CodesysXmlDocumenter:
                 self.status_var.set("Warning: Selected item type not supported for UML export.")
                 return
 
+            # Check if file was created
             if html_file and Path(html_file).exists():
                 success_msg = f"Generated {uml_format} diagram: {html_file}"
                 self.logger.info(success_msg)
@@ -668,6 +768,179 @@ class CodesysXmlDocumenter:
             error_msg = f"{uml_format} generation failed: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
             self.status_var.set(f"Error: {str(e)}")
+
+    def _export_all_uml(self, uml_format="flowchart"):
+        """Export UML diagrams for ALL structures, unions, and enums"""
+        if not self.xml_export:
+            self.logger.warning("No data loaded. Please load an XML file first.")
+            self.status_var.set("Warning: No data loaded. Please load an XML file first.")
+            return
+
+        # Calculate total items
+        total_structures = len([s for s in self.xml_export.structures if not s.is_union])
+        total_unions = len(self.xml_export.unions)
+        total_enums = len(self.xml_export.enums)
+        total_items = total_structures + total_unions + total_enums
+
+        if total_items == 0:
+            self.logger.warning("No structures, unions, or enums found to export.")
+            self.status_var.set("Warning: No items found to export.")
+            from tkinter import messagebox
+            messagebox.showwarning("No Items", "No structures, unions, or enums found to export.")
+            return
+
+        # Ask for confirmation
+        from tkinter import messagebox
+        confirm = messagebox.askyesno(
+            "Confirm Export",
+            f"Export {total_items} {uml_format} diagrams?\n\n"
+            f"• Structures: {total_structures}\n"
+            f"• Unions: {total_unions}\n"
+            f"• Enums: {total_enums}\n\n"
+            f"This may take a while. Continue?"
+        )
+
+        if not confirm:
+            return
+
+        # Get output directory
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = Path(f"uml_exports_{uml_format}_{timestamp}")
+        output_dir.mkdir(exist_ok=True)
+
+        try:
+            # Import appropriate generator based on format
+            if uml_format == "flowchart":
+                from flowchart_generator import FlowchartGenerator
+                generator = FlowchartGenerator(self.logger)
+            elif uml_format == "er":
+                from erdiagram_generator import ERDiagramGenerator
+                generator = ERDiagramGenerator(self.logger)
+            elif uml_format == "class":
+                from classdiagram_generator import ClassDiagramGenerator
+                generator = ClassDiagramGenerator(self.logger)
+            else:
+                self.logger.error(f"Unknown UML format: {uml_format}")
+                self.status_var.set(f"Error: Unknown UML format: {uml_format}")
+                return
+
+            # Track statistics
+            total_processed = 0
+            successful_exports = 0
+            failed_exports = []
+
+            # Export all structures
+            if hasattr(generator, 'generate_for_structure'):
+                self.status_var.set(f"Exporting {uml_format} for all structures ({total_structures})...")
+                self.root.update()
+
+                for structure in self.xml_export.structures:
+                    if not structure.is_union:  # Only actual structures, not unions
+                        total_processed += 1
+                        try:
+                            self.logger.info(f"Generating {uml_format} for structure: {structure.name}")
+                            result = generator.generate_for_structure(structure, self.xml_export, output_dir)
+
+                            # Handle tuple or string return
+                            if isinstance(result, tuple):
+                                html_path = result[0]
+                            else:
+                                html_path = result
+
+                            if html_path and Path(html_path).exists():
+                                successful_exports += 1
+                                self.logger.debug(f"Successfully exported {structure.name}")
+                            else:
+                                failed_exports.append(f"Structure: {structure.name}")
+                        except Exception as e:
+                            self.logger.error(f"Failed to export structure {structure.name}: {str(e)}")
+                            failed_exports.append(f"Structure: {structure.name}")
+
+            # Export all unions
+            if hasattr(generator, 'generate_for_union'):
+                self.status_var.set(f"Exporting {uml_format} for all unions ({total_unions})...")
+                self.root.update()
+
+                for union in self.xml_export.unions:
+                    total_processed += 1
+                    try:
+                        self.logger.info(f"Generating {uml_format} for union: {union.name}")
+                        result = generator.generate_for_union(union, self.xml_export, output_dir)
+
+                        # Handle tuple or string return
+                        if isinstance(result, tuple):
+                            html_path = result[0]
+                        else:
+                            html_path = result
+
+                        if html_path and Path(html_path).exists():
+                            successful_exports += 1
+                            self.logger.debug(f"Successfully exported {union.name}")
+                        else:
+                            failed_exports.append(f"Union: {union.name}")
+                    except Exception as e:
+                        self.logger.error(f"Failed to export union {union.name}: {str(e)}")
+                        failed_exports.append(f"Union: {union.name}")
+
+            # Export all enums
+            if hasattr(generator, 'generate_for_enum'):
+                self.status_var.set(f"Exporting {uml_format} for all enums ({total_enums})...")
+                self.root.update()
+
+                for enum in self.xml_export.enums:
+                    total_processed += 1
+                    try:
+                        self.logger.info(f"Generating {uml_format} for enum: {enum.name}")
+                        result = generator.generate_for_enum(enum, output_dir)
+
+                        # Handle tuple or string return
+                        if isinstance(result, tuple):
+                            html_path = result[0]
+                        else:
+                            html_path = result
+
+                        if html_path and Path(html_path).exists():
+                            successful_exports += 1
+                            self.logger.debug(f"Successfully exported {enum.name}")
+                        else:
+                            failed_exports.append(f"Enum: {enum.name}")
+                    except Exception as e:
+                        self.logger.error(f"Failed to export enum {enum.name}: {str(e)}")
+                        failed_exports.append(f"Enum: {enum.name}")
+
+            # Show completion message
+            success_msg = f"Exported {successful_exports} of {total_processed} {uml_format} diagrams to:\n{output_dir}"
+
+            if failed_exports:
+                success_msg += f"\n\nFailed to export {len(failed_exports)} items."
+                # Log failed items
+                for failed in failed_exports[:10]:  # Show first 10 failures
+                    self.logger.warning(f"Failed: {failed}")
+                if len(failed_exports) > 10:
+                    self.logger.warning(f"... and {len(failed_exports) - 10} more failures")
+
+            self.logger.info(f"UML export complete: {successful_exports}/{total_processed} successful")
+            self.status_var.set(f"Exported {successful_exports} of {total_processed} {uml_format} diagrams")
+
+            # Show summary dialog
+            messagebox.showinfo(
+                "Export Complete",
+                f"Generated {successful_exports} of {total_processed} {uml_format} diagrams.\n\n"
+                f"Output folder: {output_dir}\n\n"
+                f"{'All exports successful!' if successful_exports == total_processed else f'{len(failed_exports)} exports failed. Check logs for details.'}"
+            )
+
+        except ImportError as e:
+            error_msg = f"Failed to import {uml_format} generator: {str(e)}"
+            self.logger.error(error_msg)
+            self.status_var.set(f"Error: {uml_format} generator not available")
+            messagebox.showerror("Export Error", error_msg)
+        except Exception as e:
+            error_msg = f"{uml_format} export failed: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            self.status_var.set(f"Error: {str(e)}")
+            messagebox.showerror("Export Error", error_msg)
+
     def run(self):
         """Start the application"""
         self.root.mainloop()
